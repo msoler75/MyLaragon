@@ -1,16 +1,51 @@
-# React + Vite
+# MyLaragon (Companion App) 🚀
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**MyLaragon** es un controlador ligero y moderno diseñado como un **subset de herramientas** para complementar tu instalación existente de **Laragon**. 
 
-Currently, two official plugins are available:
+No es un reemplazo de Laragon, sino una interfaz alternativa enfocada en la velocidad y la estética para las tareas más cotidianas del desarrollo web. Utiliza tu configuración actual de `laragon.ini` para ofrecer un control rápido y visual.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 🎯 Propósito
 
-## React Compiler
+Esta aplicación nace para usuarios que ya tienen Laragon configurado y buscan:
+- Un **Dashboard visual** y moderno para el control de servicios.
+- Acceso rápido a las **funciones básicas** sin navegar por menús complejos.
+- Soporte **multi-idioma** nativo y extensible.
+- Una experiencia de usuario minimalista y fluida.
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
+## ✨ Características Principales
 
-## Expanding the ESLint configuration
+- ⚡ **Control de Servicios**: Inicia y detén Apache, MySQL, Nginx, Redis, Mailpit y MongoDB confiando en los binarios de tu Laragon.
+- 🌍 **Multi-idioma**: Soporte para Español, Inglés, Alemán (extensible mediante JSON).
+- 📊 **Estado en Tiempo Real**: Visualización inmediata de puertos y procesos en ejecución.
+- 🛠️ **Acceso Directo**: Botones para Terminal, Editor de Hosts, Variables de Entorno y carpetas de proyecto.
+- ⚙️ **Configuración**: Define tu editor de código preferido y la ruta de Laragon una sola vez.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 🚀 Requisitos de Uso
+
+1. **Tener Laragon instalado** en tu sistema Windows.
+2. Configurar la ruta de instalación de Laragon en el apartado de **Ajustes** dentro de MyLaragon al abrirlo por primera vez.
+
+## 🛠️ Desarrollo
+
+Si quieres contribuir o compilar el proyecto tú mismo:
+
+### Requisitos
+- Node.js (v18 o superior)
+- Laragon instalado en Windows
+
+### Pasos
+1. Clona el repositorio.
+2. Instala las dependencias: `npm install`
+3. Ejecuta en modo desarrollo: `npm run dev`
+4. Para compilar el instalador (.exe): `npm run dist`
+
+## 🌍 Añadir Idiomas
+
+Para añadir un nuevo idioma:
+1. Crea un archivo `tu-idioma.json` en `src/i18n/`.
+2. Define `"languageName": "Nombre del Idioma"`.
+3. Traduce las claves. La app lo detectará automáticamente.
+
+## 📄 Licencia
+
+Este proyecto está bajo la Licencia MIT.
