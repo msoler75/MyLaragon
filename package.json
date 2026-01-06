@@ -1,8 +1,8 @@
 {
   "name": "mylaragon",
   "private": true,
-  "version": "0.0.0",
-  "main": "electron/main.js",
+  "version": "0.0.0",  "description": "A modern and lightweight companion app for Laragon",
+  "author": "msoler75",  "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npx kill-port 5173 && vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 --timeout 20000 && npm run electron\"",

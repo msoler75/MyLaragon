@@ -9,7 +9,30 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Ruta para guardar la configuración del usuario
-const configPath = path.join(app.getPath('userData'), 'user-config.json');
+const userDataPath = app.getPath('userData');
+const configPath = path.join(userDataPath, 'user-config.json');
+const logPath = path.join(userDataPath, 'app.log');
+
+// Sistema de logs simple
+function log(message, level = 'INFO') {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] [${level}] ${message}\n`;
+  console.log(logMessage.trim());
+  try {
+    fs.appendFileSync(logPath, logMessage);
+  } catch (err) {
+    console.error('Error writing to log file:', err);
+  }
+}
+
+// Limpiar log antiguo al iniciar
+try {
+  if (fs.existsSync(logPath)) {
+    fs.writeFileSync(logPath, '');
+  }
+} catch (err) {}
+
+log('Application starting...');
 
 // Configuración por defecto
 let userConfig = {
@@ -26,17 +49,19 @@ function loadUserConfig() {
     if (fs.existsSync(configPath)) {
       const data = fs.readFileSync(configPath, 'utf-8');
       userConfig = { ...userConfig, ...JSON.parse(data) };
+      log('User config loaded successfully');
     }
   } catch (error) {
-    console.error('Error loading config:', error);
+    log(`Error loading config: ${error.message}`, 'ERROR');
   }
 }
 
 function saveUserConfig() {
   try {
     fs.writeFileSync(configPath, JSON.stringify(userConfig, null, 2));
+    log('User config saved');
   } catch (error) {
-    console.error('Error saving config:', error);
+    log(`Error saving config: ${error.message}`, 'ERROR');
   }
 }
 
@@ -85,22 +110,26 @@ function getLaragonConfig() {
   const iniPath = path.join(userConfig.laragonPath, 'usr', 'laragon.ini');
   const config = {};
   try {
-    const content = fs.readFileSync(iniPath, 'utf-8');
-    const lines = content.split('\n');
-    let section = '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        section = trimmed.slice(1, -1);
-      } else if (trimmed.includes('=')) {
-        const [key, ...valueParts] = trimmed.split('=');
-        const value = valueParts.join('=');
-        if (!config[section]) config[section] = {};
-        config[section][key] = value;
+    if (fs.existsSync(iniPath)) {
+      const content = fs.readFileSync(iniPath, 'utf-8');
+      const lines = content.split('\n');
+      let section = '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          section = trimmed.slice(1, -1);
+        } else if (trimmed.includes('=')) {
+          const [key, ...valueParts] = trimmed.split('=');
+          const value = valueParts.join('=');
+          if (!config[section]) config[section] = {};
+          config[section][key] = value;
+        }
       }
+    } else {
+      log(`Laragon config not found at: ${iniPath}`, 'WARNING');
     }
   } catch (error) {
-    console.error('Error reading laragon.ini:', error);
+    log(`Error reading laragon.ini: ${error.message}`, 'ERROR');
   }
   return config;
 }
@@ -409,7 +438,7 @@ async function getServiceStatus(service) {
     
     return { status, port, details, processRunning, portInUse, processName };
   } catch (error) {
-    console.error('Error checking service status:', error);
+    log(`Error checking service status: ${error.message}`, 'ERROR');
     return { status: 'unknown', port: null, details: 'Error al verificar estado', processRunning: false, portInUse: false, processName: '' };
   }
 }
@@ -606,6 +635,7 @@ ipcMain.handle('select-directory', async () => {
 let mainWindow;
 
 async function createWindow() {
+  log('Creating main window...');
   // Iniciar servidor MCP para DevTools con el puerto detectado
   console.log(`Using debug port for MCP: ${debugPort}`);
   
@@ -621,10 +651,28 @@ async function createWindow() {
     },
   });
 
+  // Habilitar F12 para abrir DevTools siempre
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' && input.type === 'keyDown') {
+      log('F12 pressed, toggling DevTools');
+      mainWindow.webContents.toggleDevTools();
+    }
+    // También Ctrl+Shift+I
+    if (input.control && input.shift && input.key.toLowerCase() === 'i' && input.type === 'keyDown') {
+      log('Ctrl+Shift+I pressed, toggling DevTools');
+      mainWindow.webContents.toggleDevTools();
+    }
+  });
+
   // Cargar la app React
   if (app.isPackaged) {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    log(`Loading packaged index.html from: ${indexPath}`);
+    mainWindow.loadFile(indexPath).catch(err => {
+      log(`Error loading index.html: ${err.message}`, 'ERROR');
+    });
   } else {
+    log('Loading dev URL: http://localhost:5173');
     mainWindow.loadURL('http://localhost:5173');
     // Abrir DevTools solo en desarrollo
     mainWindow.webContents.openDevTools();
