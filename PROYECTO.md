@@ -1,7 +1,3 @@
-Aquí tienes un prompt completo que puedes usar (por ejemplo, en otro asistente especializado en código o como README inicial del proyecto). Adáptalo con tus matices si lo ves necesario:
-
-***
-
 Quiero diseñar y desarrollar una aplicación de escritorio para **Windows 11** que actúe como un “panel de control avanzado” para Laragon, combinando lo mejor de la UI de Laragon y de XAMPP, pero hecha con tecnologías modernas.
 
 ### Objetivo general

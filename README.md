@@ -4,6 +4,8 @@
 
 No es un reemplazo de Laragon, sino una interfaz alternativa enfocada en la velocidad y la estética para las tareas más cotidianas del desarrollo web. Utiliza tu configuración actual de `laragon.ini` para ofrecer un control rápido y visual.
 
+![](./sample.png)
+
 ## 🎯 Propósito
 
 Esta aplicación nace para usuarios que ya tienen Laragon configurado y buscan:
