@@ -6,8 +6,8 @@
   "panelControl": "Panel de Control",
   "globalStatus": "Estado Global",
   "refresh": "Refrescar",
-  "online": "Online",
-  "offline": "Offline",
+  "online": "En línea",
+  "offline": "Apagado",
   "processing": "Procesando...",
   "wait": "Espere...",
   "ready": "Listo",
@@ -66,6 +66,12 @@
   "statusWarning": "Conflicto",
   "statusError": "Error",
   "OPEN_DOCROOT": "Abrir DocumentRoot",
+  "start": "Iniciar",
+  "stop": "Detener",
   "startAll": "Activar todos",
-  "stopAll": "Detener todos"
+  "stopAll": "Detener todos",
+  "active": "Activo",
+  "idle": "Inactivo",
+  "running": "Ejecutando",
+  "stopped": "Detenido"
 }

@@ -108,7 +108,19 @@ const execAsync = (command) => {
 
 // Leer configuración de Laragon
 function getLaragonConfig() {
-  const iniPath = path.join(userConfig.laragonPath, 'usr', 'laragon.ini');
+  const possiblePaths = [
+    path.join(userConfig.laragonPath, 'laragon.ini'),
+    path.join(userConfig.laragonPath, 'usr', 'laragon.ini')
+  ];
+
+  let iniPath = possiblePaths[0];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      iniPath = p;
+      break;
+    }
+  }
+
   const config = {};
   try {
     if (fs.existsSync(iniPath)) {
@@ -118,12 +130,12 @@ function getLaragonConfig() {
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-          section = trimmed.slice(1, -1);
+          section = trimmed.slice(1, -1).toLowerCase();
         } else if (trimmed.includes('=')) {
           const [key, ...valueParts] = trimmed.split('=');
           const value = valueParts.join('=');
           if (!config[section]) config[section] = {};
-          config[section][key] = value;
+          config[section][key.trim().toLowerCase()] = value.trim();
         }
       }
     } else {
@@ -141,11 +153,11 @@ console.log('Main process starting...');
 function detectServices() {
   const config = getLaragonConfig();
   const services = [];
-  const phpVersion = config.php?.Version;
+  const phpVersion = config.php?.version;
   
-  if (config.apache && config.apache.Version) {
-    const apacheBase = path.join(userConfig.laragonPath, 'bin', 'apache', config.apache.Version);
-    const documentRoot = config.apache?.DocumentRoot || userConfig.projectsPath;
+  if (config.apache && config.apache.version) {
+    const apacheBase = path.join(userConfig.laragonPath, 'bin', 'apache', config.apache.version);
+    const documentRoot = config.apache?.documentroot || userConfig.projectsPath;
     const apacheConfigs = [
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
       { label: 'httpd.conf', path: path.join(apacheBase, 'conf', 'httpd.conf') },
@@ -156,13 +168,14 @@ function detectServices() {
     services.push({ 
       name: 'Apache', 
       type: 'apache', 
-      version: config.apache.Version,
+      version: config.apache.version,
+      phpVersion: phpVersion,
       configs: apacheConfigs
     });
   }
 
-  if (config.mysql && config.mysql.Version) {
-    const mysqlBase = path.join(userConfig.laragonPath, 'bin', 'mysql', config.mysql.Version);
+  if (config.mysql && config.mysql.version) {
+    const mysqlBase = path.join(userConfig.laragonPath, 'bin', 'mysql', config.mysql.version);
     const mysqlConfigs = [
       { label: 'my.ini', path: path.join(mysqlBase, 'my.ini') },
       { label: 'error.log', path: path.join(userConfig.laragonPath, 'data', 'mysql', 'error.log') }
@@ -171,33 +184,39 @@ function detectServices() {
     services.push({ 
       name: 'MySQL', 
       type: 'mysql', 
-      version: config.mysql.Version,
+      version: config.mysql.version,
       configs: mysqlConfigs
     });
   }
 
-  if (config.nginx && config.nginx.Version) {
-    const nginxBase = path.join(userConfig.laragonPath, 'bin', 'nginx', config.nginx.Version);
-    const documentRoot = config.apache?.DocumentRoot || userConfig.projectsPath; // Nginx suele compartirlo
+  if (config.nginx && config.nginx.version) {
+    const nginxBase = path.join(userConfig.laragonPath, 'bin', 'nginx', config.nginx.version);
+    const documentRoot = config.apache?.documentroot || userConfig.projectsPath; // Nginx suele compartirlo
     const nginxConfigs = [
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
       { label: 'nginx.conf', path: path.join(nginxBase, 'conf', 'nginx.conf') },
       { label: 'php.ini', path: phpVersion ? path.join(userConfig.laragonPath, 'bin', 'php', phpVersion, 'php.ini') : '' }
     ].filter(c => c.path);
-    services.push({ name: 'Nginx', type: 'nginx', version: config.nginx.Version, configs: nginxConfigs });
+    services.push({ 
+      name: 'Nginx', 
+      type: 'nginx', 
+      version: config.nginx.version, 
+      phpVersion: phpVersion,
+      configs: nginxConfigs 
+    });
   }
-  if (config.postgresql && config.postgresql.Version) {
-    services.push({ name: 'PostgreSQL', type: 'postgresql', version: config.postgresql.Version });
+  if (config.postgresql && config.postgresql.version) {
+    services.push({ name: 'PostgreSQL', type: 'postgresql', version: config.postgresql.version });
   }
-  if (config.redis && config.redis.Version) {
-    services.push({ name: 'Redis', type: 'redis', version: config.redis.Version });
+  if (config.redis && config.redis.version) {
+    services.push({ name: 'Redis', type: 'redis', version: config.redis.version });
   }
-  if (config.memcached && config.memcached.Version) {
-    services.push({ name: 'Memcached', type: 'memcached', version: config.memcached.Version });
+  if (config.memcached && config.memcached.version) {
+    services.push({ name: 'Memcached', type: 'memcached', version: config.memcached.version });
   }
   
   // Mailpit detection
-  let mailpitVersion = config.mailpit?.Version;
+  let mailpitVersion = config.mailpit?.version;
   if (!mailpitVersion) {
     const mailpitDir = path.join(userConfig.laragonPath, 'bin', 'mailpit');
     if (fs.existsSync(mailpitDir)) {
@@ -210,7 +229,7 @@ function detectServices() {
   }
 
   // MongoDB detection
-  let mongodbVersion = config.mongodb?.Version;
+  let mongodbVersion = config.mongodb?.version;
   if (!mongodbVersion) {
     const mongodbDir = path.join(userConfig.laragonPath, 'bin', 'mongodb');
     if (fs.existsSync(mongodbDir)) {
@@ -230,14 +249,18 @@ ipcMain.handle('get-services', async (event, hiddenServices = []) => {
   // console.log('get-services handler called');
   try {
     const services = detectServices();
-    // console.log('Detected services:', services);
+    
+    // Optimizamos: una sola llamada para obtener todos los puertos y procesos
+    const portsMap = await getAllListeningPorts();
+    const processMap = await getAllProcesses();
+
     const servicesWithStatus = await Promise.all(
       services.map(async (service) => {
         // Si el servicio está oculto, no verificamos su estado para ahorrar recursos
         if (hiddenServices.includes(service.name)) {
           return { ...service, status: 'hidden' };
         }
-        const status = await getServiceStatus(service);
+        const status = await getServiceStatus(service, portsMap, processMap);
         return { ...service, ...status };
       })
     );
@@ -372,7 +395,62 @@ ipcMain.handle('open-env-vars', async () => {
   exec('rundll32.exe sysdm.cpl,EditEnvironmentVariables');
 });
 
-async function getServiceStatus(service) {
+async function getAllListeningPorts() {
+  return new Promise((resolve) => {
+    // Optimizamos usando findstr para filtrar solo puertos en escucha
+    exec(`netstat -ano | findstr LISTENING`, (error, stdout) => {
+      if (error || !stdout) {
+        resolve({});
+        return;
+      }
+
+      const portsMap = {};
+      const lines = stdout.split("\n");
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        // Formato: Protocolo, LocalAddr, RemoteAddr, State, PID
+        if (parts.length >= 5) {
+          const localAddr = parts[1];
+          const pid = parts[4];
+          const lastColon = localAddr.lastIndexOf(':');
+          if (lastColon !== -1) {
+            const port = localAddr.substring(lastColon + 1);
+            portsMap[port] = pid;
+          }
+        }
+      }
+      resolve(portsMap);
+    });
+  });
+}
+
+async function getAllProcesses() {
+  return new Promise((resolve) => {
+    // Obtenemos todos los procesos de una vez en formato CSV
+    exec(`tasklist /NH /FO CSV`, (error, stdout) => {
+      if (error || !stdout) {
+        resolve({});
+        return;
+      }
+      
+      const processMap = {};
+      const lines = stdout.split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const parts = line.split("\",\"");
+        if (parts.length > 1) {
+          const name = parts[0].replace(/"/g, "").toLowerCase();
+          const pid = parts[1].replace(/"/g, "");
+          if (!processMap[name]) processMap[name] = [];
+          processMap[name].push(pid);
+        }
+      }
+      resolve(processMap);
+    });
+  });
+}
+
+async function getServiceStatus(service, portsMap = {}, processMap = {}) {
   try {
     let processRunning = false;
     let portInUse = false;
@@ -417,27 +495,27 @@ async function getServiceStatus(service) {
         return { status: 'unknown', port: null, details: 'Unsupported service type' };
     }
     
-    const processInfo = await checkProcess(processName);
-    const portInfo = await checkPort(port);
+    // Verificamos procesos usando el mapa pre-cargado
+    const pids = processMap[processName.toLowerCase()] || [];
+    processRunning = pids.length > 0;
     
-    processRunning = processInfo.running;
-    portInUse = portInfo.inUse;
+    // Verificamos puertos usando el mapa pre-cargado
+    const portPid = portsMap[port.toString()];
+    portInUse = !!portPid;
     
     let status;
     let details = '';
     
     if (portInUse) {
-      // Si el puerto está en uso (LISTENING), verificamos si el PID pertenece a nuestro servicio
-      const isOurProcess = processInfo.pids.includes(portInfo.pid);
+      const isOurProcess = pids.includes(portPid);
       if (isOurProcess) {
         status = 'running';
-        details = `Proceso ${processName} (PIDs: ${processInfo.pids.join(',')}) escuchando en puerto ${port}.`;
+        details = `Proceso ${processName} (PIDs: ${pids.join(',')}) escuchando en puerto ${port}.`;
       } else {
         status = 'port_occupied_by_other';
-        details = `El puerto ${port} está ocupado por otro proceso (PID: ${portInfo.pid}).`;
+        details = `El puerto ${port} está ocupado por otro proceso (PID: ${portPid}).`;
       }
     } else if (processRunning) {
-      // El proceso existe pero no hay nada en LISTENING en ese puerto
       status = 'running_but_port_not_listening';
       details = `Proceso ${processName} activo pero puerto ${port} no está escuchando.`;
     } else {
@@ -450,70 +528,6 @@ async function getServiceStatus(service) {
     log(`Error checking service status: ${error.message}`, 'ERROR');
     return { status: 'unknown', port: null, details: 'Error al verificar estado', processRunning: false, portInUse: false, processName: '' };
   }
-}
-
-async function checkProcess(processName) {
-  return new Promise((resolve) => {
-    // Usamos /FO CSV para obtener datos estructurados y poder extraer PIDs
-    exec(`tasklist /FI "IMAGENAME eq ${processName}" /NH /FO CSV`, (error, stdout) => {
-      if (error || !stdout || stdout.includes("No hay tareas")) {
-        resolve({ running: false, pids: [] });
-        return;
-      }
-      
-      const pids = [];
-      const lines = stdout.split("\n");
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        // El formato CSV es "Nombre de imagen","PID","Nombre de sesión","Núm de sesión","Uso de memoria"
-        const parts = line.split("\",\"");
-        if (parts.length > 1) {
-          const pid = parts[1].replace(/"/g, "");
-          if (!isNaN(parseInt(pid))) {
-            pids.push(pid);
-          }
-        }
-      }
-      resolve({ running: pids.length > 0, pids });
-    });
-  });
-}
-
-async function checkPort(port) {
-  return new Promise((resolve) => {
-    // netstat -ano devuelve todas las conexiones con PID
-    exec(`netstat -ano`, (error, stdout) => {
-      if (error) {
-        resolve({ inUse: false, pid: null });
-        return;
-      }
-
-      const lines = stdout.split("\n");
-      const portStr = `:${port}`;
-      
-      for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 5) continue;
-
-        const localAddr = parts[1]; // e.g. 0.0.0.0:80 or [::]:80
-        const state = parts[3];
-        const pid = parts[4];
-
-        // Validar que el puerto coincida exactamente al final de la dirección local
-        // Esto evita que :80 coincida con :8025
-        const isExactPort = localAddr.endsWith(portStr);
-        
-        // Solo consideramos conflicto real si está en estado LISTENING
-        // Estados como CLOSE_WAIT o FIN_WAIT no bloquean la escucha de nuevos procesos usualmente
-        if (isExactPort && state === "LISTENING") {
-          resolve({ inUse: true, pid: pid, state: state });
-          return;
-        }
-      }
-      
-      resolve({ inUse: false, pid: null });
-    });
-  });
 }
 
 async function startService(service) {
@@ -745,10 +759,13 @@ async function createWindow() {
     if (userConfig.autoStart) {
       console.log('Auto-starting services...');
       const services = detectServices();
+      const portsMap = await getAllListeningPorts();
+      const processMap = await getAllProcesses();
+      
       for (const service of services) {
         try {
           // Solo iniciar si no está ya corriendo
-          const statusResult = await getServiceStatus(service);
+          const statusResult = await getServiceStatus(service, portsMap, processMap);
           if (statusResult.status !== 'running') {
             await startService(service);
             console.log(`Auto-started ${service.name}`);

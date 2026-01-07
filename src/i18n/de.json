@@ -66,6 +66,12 @@
   "statusWarning": "Konflikt",
   "statusError": "Fehler",
   "OPEN_DOCROOT": "DocumentRoot öffnen",
+  "start": "Starten",
+  "stop": "Stoppen",
   "startAll": "Alle aktivieren",
-  "stopAll": "Alle stoppen"
+  "stopAll": "Alle stoppen",
+  "active": "Aktiv",
+  "idle": "Inaktiv",
+  "running": "Läuft",
+  "stopped": "Gestoppt"
 }

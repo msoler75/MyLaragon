@@ -66,6 +66,12 @@
   "statusWarning": "Conflict",
   "statusError": "Error",
   "OPEN_DOCROOT": "Open DocumentRoot",
+  "start": "Start",
+  "stop": "Stop",
   "startAll": "Start all",
-  "stopAll": "Stop all"
+  "stopAll": "Stop all",
+  "active": "Active",
+  "idle": "Idle",
+  "running": "Running",
+  "stopped": "Stopped"
 }

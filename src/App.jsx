@@ -62,6 +62,29 @@ function App() {
     return saved ? JSON.parse(saved) : []
   })
 
+  const t = translations[config.language] || translations.es
+
+  const refreshingRef = useRef(false);
+  const loadServices = useCallback(async (isSilent = false) => {
+    // Si viene de un evento de React o similar, isSilent no será estrictamente true
+    const silent = isSilent === true;
+    
+    if (window.electronAPI && !refreshingRef.current) {
+      refreshingRef.current = true;
+      if (!silent) setLoading(true)
+      try {
+        const servicesData = await window.electronAPI.getServices(hiddenServices)
+        // Solo actualizamos si no hay acciones en curso que puedan ser invalidadas
+        setServices(servicesData)
+      } catch (error) {
+        console.error('Error loading services:', error)
+      } finally {
+        if (!silent) setLoading(false)
+        refreshingRef.current = false;
+      }
+    }
+  }, [hiddenServices]);
+
   // Aplicar tema
   useEffect(() => {
     const applyTheme = (themeKey) => {
@@ -107,38 +130,27 @@ function App() {
   // Sistema de actualización inteligente: pausa durante acciones para evitar parpadeos y race conditions
   useEffect(() => {
     if (processingServices.length === 0) {
-      const interval = setInterval(loadServices, 7000)
+      const interval = setInterval(() => loadServices(true), 7000)
       return () => clearInterval(interval)
     }
-  }, [hiddenServices, processingServices.length])
-
-  const t = translations[config.language] || translations.es
-
-  const refreshingRef = useRef(false);
-  const loadServices = useCallback(async () => {
-    if (window.electronAPI && !refreshingRef.current) {
-      refreshingRef.current = true;
-      setLoading(true)
-      try {
-        const servicesData = await window.electronAPI.getServices(hiddenServices)
-        // Solo actualizamos si no hay acciones en curso que puedan ser invalidadas
-        setServices(servicesData)
-      } catch (error) {
-        console.error('Error loading services:', error)
-      } finally {
-        setLoading(false)
-        refreshingRef.current = false;
-      }
-    }
-  }, [hiddenServices]);
+  }, [hiddenServices, processingServices.length, loadServices])
 
   const handleStartService = async (serviceName) => {
     if (window.electronAPI && !processingServices.includes(serviceName)) {
       try {
         setProcessingServices(prev => [...prev, serviceName])
+        
+        // Identificar tipo para el delay de estabilización
+        const service = services.find(s => s.name === serviceName);
+        const type = service?.type?.toLowerCase() || '';
+        const isHeavy = ['mysql', 'mariadb', 'mongodb', 'postgresql'].includes(type);
+        
         await window.electronAPI.startService(serviceName);
-        // Espera prudencial y recarga forzada
-        await new Promise(resolve => setTimeout(resolve, 2500));
+        
+        // Espera dinámica: DBs necesitan más tiempo para abrir puertos
+        const delay = isHeavy ? 4500 : (['apache', 'nginx'].includes(type) ? 2500 : 1500);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
         await loadServices();
       } catch (error) {
         console.error('Error starting service:', error);
@@ -152,9 +164,17 @@ function App() {
     if (window.electronAPI && !processingServices.includes(serviceName)) {
       try {
         setProcessingServices(prev => [...prev, serviceName])
+        
+        const service = services.find(s => s.name === serviceName);
+        const type = service?.type?.toLowerCase() || '';
+        const isHeavy = ['mysql', 'mariadb', 'mongodb', 'postgresql'].includes(type);
+        
         await window.electronAPI.stopService(serviceName)
-        // Espera para cierre limpio y recarga
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // El stop suele ser más rápido pero las DBs limpian locks
+        const delay = isHeavy ? 2000 : 1200;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
         await loadServices()
       } catch (error) {
         console.error('Error stopping service:', error);
@@ -294,6 +314,19 @@ function App() {
 function Services({ services, hiddenServices, processingServices = [], isBulkRunning, loading, onToggleVisibility, onStart, onStop, onStartAll, onStopAll, t }) {
   const [showHidden, setShowHidden] = useState(false)
   const [menuOpen, setMenuOpen] = useState(null)
+
+  // Helper function to shorten long version strings for the UI
+  // (e.g. httpd-2.4.62-240904-win... -> 2.4.62)
+  const formatVersion = (v) => {
+    if (!v) return '';
+    // Normalize and remove common prefixes
+    let clean = v.replace(/^(httpd|php|mysql|mariadb|nginx|redis|postgres|mongodb|memcached)-/i, '');
+    // Regex to match the version number x.x.x
+    const match = clean.match(/^\d+\.\d+(\.\d+)?/);
+    if (match) return match[0];
+    // Fallback: take the first segment before any dash
+    return clean.split('-')[0];
+  };
   
   const visibleServices = services.filter(s => !hiddenServices.includes(s.name))
   const hiddenList = services.filter(s => hiddenServices.includes(s.name))
@@ -318,32 +351,68 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
 
   return (
     <div className="space-y-4 pb-10">
-      <div className="flex items-center justify-end space-x-2 mb-2">
-        <button 
-          onClick={() => window.electronAPI.openLaragonFolder()}
-          className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
-        >
-          <Folder size={12} />
-          <span>Laragon</span>
-        </button>
-        <button 
-          onClick={() => window.electronAPI.openDocumentRoot()}
-          className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
-        >
-          <ExternalLink size={12} />
-          <span>WWW</span>
-        </button>
-        <div className="flex items-center space-x-2 bg-app-surface px-2.5 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm uppercase tracking-widest">
-          <Activity size={10} className="text-app-success" />
-          <span>{services.filter(s => s.status === 'running').length}/{services.length} {t.activeServices}</span>
+      <div className="flex items-center justify-between mb-10">
+        <div className="flex items-center space-x-2">
+          <button 
+            onClick={onStartAll}
+            disabled={!canStartAll || isBulkRunning}
+            className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border font-black text-[10px] uppercase tracking-wider transition-all shadow-sm ${
+              !canStartAll || isBulkRunning
+                ? 'bg-app-bg text-app-text-muted border-app-border cursor-not-allowed opacity-50'
+                : 'bg-app-success/10 text-app-success border-app-success/30 hover:bg-app-success hover:text-white'
+            }`}
+          >
+            {isBulkRunning ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} fill="currentColor" />}
+            <span>{t.startAll}</span>
+          </button>
+          <button 
+            onClick={onStopAll}
+            disabled={!canStopAll || isBulkRunning}
+            className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border font-black text-[10px] uppercase tracking-wider transition-all shadow-sm ${
+              !canStopAll || isBulkRunning
+                ? 'bg-app-bg text-app-text-muted border-app-border cursor-not-allowed opacity-50'
+                : 'bg-app-danger/10 text-app-danger border-app-danger/30 hover:bg-app-danger hover:text-white'
+            }`}
+          >
+            {isBulkRunning ? <RefreshCw size={12} className="animate-spin" /> : <Square size={12} fill="currentColor" />}
+            <span>{t.stopAll}</span>
+          </button>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button 
+            onClick={() => window.electronAPI.openLaragonFolder()}
+            className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
+          >
+            <Folder size={12} />
+            <span>Laragon</span>
+          </button>
+          <button 
+            onClick={() => window.electronAPI.openDocumentRoot()}
+            className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
+          >
+            <ExternalLink size={12} />
+            <span>WWW</span>
+          </button>
+          <div className="flex items-center space-x-2 bg-app-surface px-2.5 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm uppercase tracking-widest">
+            <Activity size={10} className="text-app-success" />
+            <span>{services.filter(s => s.status === 'running').length}/{services.length} {t.activeServices}</span>
+          </div>
         </div>
       </div>
+      
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {visibleServices.map(service => {
           const isProcessing = processingServices.includes(service.name);
+          const isRunning = service.status === 'running';
+          
           return (
-            <div key={service.name} className="group bg-app-surface rounded-2xl shadow-sm border border-app-border p-4 hover:shadow-lg hover:border-app-primary/30 transition-all duration-300 relative flex flex-col h-full">
+            <div key={service.name} className={`group rounded-2xl shadow-sm border p-4 transition-all duration-300 relative flex flex-col h-full ${
+              isRunning 
+                ? 'bg-app-surface border-app-success/50 shadow-[0_8px_30px_rgba(16,185,129,0.1)] ring-1 ring-app-success/20' 
+                : 'bg-app-surface/80 border-app-border hover:shadow-lg hover:border-app-primary/30'
+            }`}>
               <button 
                 onClick={() => setMenuOpen(menuOpen === service.name ? null : service.name)}
                 className={`absolute top-3 right-3 p-1 rounded-lg transition-all z-20 ${
@@ -388,28 +457,32 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
                 <div className={`p-2 rounded-xl transition-all duration-500 shrink-0 ${
                   isProcessing 
                     ? 'bg-app-primary/10 text-app-primary animate-pulse'
-                    : service.status === 'running' 
-                      ? 'bg-app-success/10 text-app-success shadow-inner' 
+                    : isRunning 
+                      ? 'bg-app-success text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] rotate-3' 
                       : 'bg-app-bg text-app-text-muted border border-app-border'
                 }`}>
                   {getServiceIcon(service.type)}
                 </div>
-                <div className="overflow-hidden">
-                  <h3 className="text-base font-black text-app-text tracking-tight truncate uppercase italic">{service.name}</h3>
-                  <div className="flex items-center space-x-1">
-                    <span className={`h-1 w-1 rounded-full ${
+                <div className="overflow-hidden flex-1">
+                  <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : 'text-app-text'}`}>{service.name}</h3>
+                  <div className="flex items-center space-x-1.5">
+                    <span className={`rounded-full transition-all duration-500 ${
                       isProcessing 
-                        ? 'bg-app-primary animate-bounce' 
-                        : service.status === 'running' ? 'bg-app-success animate-pulse' : 'bg-app-text-muted'
+                        ? 'h-2 w-2 bg-app-primary animate-bounce' 
+                        : isRunning 
+                          ? 'h-2.5 w-2.5 bg-app-success animate-pulse shadow-[0_0_8px_var(--app-success)]' 
+                          : 'h-2 w-2 bg-app-text-muted'
                     }`}></span>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-app-text-muted">
-                      {isProcessing ? t.processing : service.status === 'running' ? t.online : t.offline}
+                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isRunning ? 'text-app-success/80' : 'text-app-text-muted'}`}>
+                      {isProcessing ? t.processing : isRunning ? t.online : t.offline}
                     </span>
                   </div>
                 </div>
               </div>
               
-              <div className="bg-app-bg/50 rounded-xl p-2 flex flex-col justify-center space-y-1.5 border border-app-border mb-3 grow">
+              <div className={`rounded-xl p-2.5 flex flex-col justify-center space-y-2 border mb-3 grow transition-all duration-500 ${
+                isRunning ? 'bg-app-success/5 border-app-success/20' : 'bg-app-bg/50 border-app-border'
+              }`}>
                 {isProcessing ? (
                   <div className="flex-1 flex flex-col items-center justify-center space-y-1 py-2">
                     <RefreshCw size={14} className="text-app-primary animate-spin" />
@@ -419,50 +492,67 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
                   <>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <div className={`w-1 h-1 rounded-full ${service.portInUse ? 'bg-app-success shadow-[0_0_6px_var(--app-success)]' : 'bg-app-text-muted'}`}></div>
-                        <span className="text-[9px] font-black text-app-text-muted uppercase tracking-widest">{t.portShort} {service.port || '---'}</span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-app-text-muted/30"></div>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isRunning ? 'text-app-success/70' : 'text-app-text-muted'}`}>Version</span>
                       </div>
-                      <span className={`text-[8px] font-black px-1 py-0.5 rounded-lg uppercase tracking-widest ${service.portInUse ? 'bg-app-success/20 text-app-success' : 'bg-app-bg text-app-text-muted border border-app-border'}`}>
-                        {service.portInUse ? 'ACTIVE' : 'IDLE'}
+                      <div className="flex items-center space-x-1">
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-app-bg text-app-text-muted border border-app-border uppercase tracking-widest">
+                          {formatVersion(service.version) || '---'}
+                        </span>
+                        {service.phpVersion && (
+                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-app-primary/10 text-app-primary border border-app-primary/20 uppercase tracking-widest">
+                            PHP {formatVersion(service.phpVersion)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <div className={`w-1.5 h-1.5 rounded-full ${service.portInUse ? 'bg-app-success shadow-[0_0_8px_var(--app-success)]' : 'bg-app-text-muted'}`}></div>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isRunning ? 'text-app-success/70' : 'text-app-text-muted'}`}>{t.portShort} {service.port || '---'}</span>
+                      </div>
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase tracking-widest transition-all ${service.portInUse ? 'bg-app-success text-white shadow-sm' : 'bg-app-bg text-app-text-muted border border-app-border'}`}>
+                        {service.portInUse ? (t.active || 'ACTIVE') : (t.idle || 'IDLE')}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <div className={`w-1 h-1 rounded-full ${service.processRunning ? 'bg-app-success shadow-[0_0_6px_var(--app-success)]' : 'bg-app-text-muted'}`}></div>
-                        <span className="text-[9px] font-black text-app-text-muted uppercase tracking-widest truncate max-w-20">{service.processName || t.process}</span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${service.processRunning ? 'bg-app-success shadow-[0_0_8px_var(--app-success)]' : 'bg-app-text-muted'}`}></div>
+                        <span className={`text-[9px] font-black uppercase tracking-widest truncate max-w-20 ${isRunning ? 'text-app-success/70' : 'text-app-text-muted'}`}>{service.processName || t.process}</span>
                       </div>
-                      <span className={`text-[8px] font-black px-1 py-0.5 rounded-lg uppercase tracking-widest ${service.processRunning ? 'bg-app-success/20 text-app-success' : 'bg-app-bg text-app-text-muted border border-app-border'}`}>
-                        {service.processRunning ? 'RUNNING' : 'STOPPED'}
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase tracking-widest transition-all ${service.processRunning ? 'bg-app-success text-white shadow-sm' : 'bg-app-bg text-app-text-muted border border-app-border'}`}>
+                        {service.processRunning ? (t.running || 'RUNNING') : (t.stopped || 'STOPPED')}
                       </span>
                     </div>
                   </>
                 )}
               </div>
 
-              <div className="space-y-1.5 mb-3">
-                {service.name === 'Mailpit' && service.status === 'running' && !isProcessing && (
-                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost:8025')} className="w-full py-1.5 bg-app-primary/10 text-app-primary hover:bg-app-primary hover:text-white rounded-lg text-[10px] font-black border border-app-primary/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest">
+              <div className="h-8 mb-3 flex items-center">
+                {service.name === 'Mailpit' && isRunning && !isProcessing && (
+                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost:8025')} className="w-full py-1.5 bg-app-primary/10 text-app-primary hover:bg-app-primary hover:text-white rounded-lg text-[10px] font-black border border-app-primary/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
                     <ExternalLink size={10} /><span>{t.openMail}</span>
                   </button>
                 )}
-                {service.type === 'apache' && service.status === 'running' && !isProcessing && (
-                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost')} className="w-full py-1.5 bg-app-success/10 text-app-success hover:bg-app-success hover:text-white rounded-lg text-[10px] font-black border border-app-success/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest">
+                {service.type === 'apache' && isRunning && !isProcessing && (
+                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost')} className="w-full py-1.5 bg-app-success/10 text-app-success hover:bg-app-success hover:text-white rounded-lg text-[10px] font-black border border-app-success/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
                     <Globe size={10} /><span>{t.openWeb}</span>
                   </button>
                 )}
-                {service.type === 'mysql' && service.status === 'running' && !isProcessing && (
-                  <button onClick={() => window.electronAPI.openDbTool()} className="w-full py-1.5 bg-app-warning/10 text-app-warning hover:bg-app-warning hover:text-white rounded-lg text-[10px] font-black border border-app-warning/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest">
+                {service.type === 'mysql' && isRunning && !isProcessing && (
+                  <button onClick={() => window.electronAPI.openDbTool()} className="w-full py-1.5 bg-app-warning/10 text-app-warning hover:bg-app-warning hover:text-white rounded-lg text-[10px] font-black border border-app-warning/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
                     <Database size={10} /><span>{t.openDb}</span>
                   </button>
                 )}
               </div>
               
               <button
-                disabled={isProcessing || loading}
+                disabled={isProcessing}
                 onClick={() => service.status === 'running' ? onStop(service.name) : onStart(service.name)}
                 className={`w-full py-2 rounded-xl font-black flex items-center justify-center space-x-2 transition-all duration-300 transform active:scale-95 border-b-2 mt-auto uppercase tracking-widest text-xs ${
-                  isProcessing || loading
+                  isProcessing
                     ? 'bg-app-bg text-app-text-muted border-app-border cursor-not-allowed translate-y-1 border-b-0 opacity-60'
                     : service.status === 'running'
                       ? 'bg-app-danger/10 text-app-danger border-app-danger/30 hover:bg-app-danger hover:text-white hover:border-app-danger'
@@ -482,38 +572,7 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
         })}
       </div>
 
-      <div className="flex justify-center space-x-8 pt-4 sticky bottom-0 bg-linear-to-t from-app-bg via-app-bg to-transparent pb-4 z-10">
-        <button 
-          onClick={onStartAll}
-          disabled={!canStartAll || loading || isBulkRunning}
-          className={`px-8 flex items-center justify-center space-x-2 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
-            !canStartAll || loading || isBulkRunning
-              ? 'bg-app-bg text-app-text-muted border border-app-border cursor-not-allowed opacity-50'
-              : 'bg-app-success text-white shadow-lg shadow-app-success/20 hover:scale-[1.02] active:scale-95'
-          }`}
-        >
-          {isBulkRunning ? (
-            <><RefreshCw size={14} className="animate-spin" /><span>{t.wait}</span></>
-          ) : (
-            <><Play size={16} fill="currentColor" /><span>{t.startAll}</span></>
-          )}
-        </button>
-        <button 
-          onClick={onStopAll}
-          disabled={!canStopAll || loading || isBulkRunning}
-          className={`px-8 flex items-center justify-center space-x-2 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
-            !canStopAll || loading || isBulkRunning
-              ? 'bg-app-bg text-app-text-muted border border-app-border cursor-not-allowed opacity-50'
-              : 'bg-app-danger text-white shadow-lg shadow-app-danger/20 hover:scale-[1.02] active:scale-95'
-          }`}
-        >
-          {isBulkRunning ? (
-            <><RefreshCw size={14} className="animate-spin" /><span>{t.wait}</span></>
-          ) : (
-            <><Square size={16} fill="currentColor" /><span>{t.stopAll}</span></>
-          )}
-        </button>
-      </div>
+     
 
       {hiddenList.length > 0 && (
         <div className="mt-8 bg-app-surface/50 border border-app-border/50 rounded-2xl p-4">
