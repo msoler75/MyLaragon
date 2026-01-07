@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronRight,
+  ChevronLeft,
+  Layers,
   Database,
   Globe,
   Mail,
@@ -272,6 +274,7 @@ function App() {
                 onToggleVisibility={toggleServiceVisibility}
                 onStart={handleStartService} 
                 onStop={handleStopService}
+                loadServices={loadServices}
                 onStartAll={async () => {
                   if (window.electronAPI) {
                     setIsBulkRunning(true)
@@ -311,21 +314,33 @@ function App() {
   )
 }
 
-function Services({ services, hiddenServices, processingServices = [], isBulkRunning, loading, onToggleVisibility, onStart, onStop, onStartAll, onStopAll, t }) {
+function Services({ services, hiddenServices, processingServices = [], isBulkRunning, loading, onToggleVisibility, onStart, onStop, onStartAll, onStopAll, t, loadServices }) {
   const [showHidden, setShowHidden] = useState(false)
   const [menuOpen, setMenuOpen] = useState(null)
+  const [activeSubMenu, setActiveSubMenu] = useState(null) // 'version' or 'php'
 
   // Helper function to shorten long version strings for the UI
-  // (e.g. httpd-2.4.62-240904-win... -> 2.4.62)
   const formatVersion = (v) => {
     if (!v) return '';
-    // Normalize and remove common prefixes
     let clean = v.replace(/^(httpd|php|mysql|mariadb|nginx|redis|postgres|mongodb|memcached)-/i, '');
-    // Regex to match the version number x.x.x
     const match = clean.match(/^\d+\.\d+(\.\d+)?/);
     if (match) return match[0];
-    // Fallback: take the first segment before any dash
     return clean.split('-')[0];
+  };
+
+  const handleChangeVersion = async (type, version) => {
+    try {
+      const result = await window.electronAPI.updateServiceVersion(type, version);
+      if (result.success) {
+        setMenuOpen(null);
+        setActiveSubMenu(null);
+        loadServices(); // Force refresh to show new version
+      } else {
+        alert("Error: " + result.message);
+      }
+    } catch (e) {
+      console.error(e);
+    }
   };
   
   const visibleServices = services.filter(s => !hiddenServices.includes(s.name))
@@ -426,29 +441,107 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
 
               {menuOpen === service.name && (
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(null)}></div>
-                  <div className="absolute top-10 right-3 w-44 bg-app-surface border border-app-border rounded-xl shadow-2xl z-40 py-1.5 animate-in fade-in zoom-in-95 duration-100 origin-top-right">
-                    <div className="px-3 py-1 mb-1 border-b border-app-border">
-                      <span className="text-[10px] font-black text-app-text-muted uppercase tracking-wider">{t.configurations}</span>
-                    </div>
-                    {service.configs?.map((conf, idx) => (
-                      <button 
-                        key={idx}
-                        onClick={() => { window.electronAPI.openConfigFile(conf); setMenuOpen(null); }} 
-                        className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
-                      >
-                        {conf.type === 'folder' ? <Folder size={12} /> : <Code size={12} />}
-                        <span className="truncate">{t[conf.label] || conf.label}</span>
-                      </button>
-                    ))}
-                    <div className="h-px bg-app-border my-1"></div>
-                    <button 
-                      onClick={() => { onToggleVisibility(service.name); setMenuOpen(null); }} 
-                      className="w-full text-left px-3 py-1.5 text-xs text-app-danger hover:bg-app-danger/10 flex items-center space-x-2 transition-colors font-bold"
-                    >
-                      <EyeOff size={12} />
-                      <span>{t.hideService}</span>
-                    </button>
+                  <div className="fixed inset-0 z-30" onClick={() => { setMenuOpen(null); setActiveSubMenu(null); }}></div>
+                  <div className={`absolute top-10 right-3 ${activeSubMenu ? 'w-80' : 'w-48'} bg-app-surface border border-app-border rounded-xl shadow-2xl z-40 py-1.5 animate-in fade-in zoom-in-95 duration-75 origin-top-right overflow-hidden transition-all duration-75`}>
+                    {!activeSubMenu ? (
+                      <>
+                        <div className="px-3 py-1 mb-1 border-b border-app-border">
+                          <span className="text-[10px] font-black text-app-text-muted uppercase tracking-wider">{t.configurations}</span>
+                        </div>
+                        
+                        {service.availableVersions?.length > 1 && (
+                          <button 
+                            onClick={() => setActiveSubMenu('version')} 
+                            className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center justify-between transition-colors font-bold"
+                          >
+                            <div className="flex items-center space-x-2">
+                              <Layers size={12} />
+                              <span>{t.switchVersion || 'Cambiar Versión'}</span>
+                            </div>
+                            <ChevronRight size={10} />
+                          </button>
+                        )}
+
+                        {service.availablePhpVersions?.length > 1 && (
+                          <button 
+                            onClick={() => setActiveSubMenu('php')} 
+                            className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center justify-between transition-colors font-bold"
+                          >
+                            <div className="flex items-center space-x-2">
+                              <Zap size={12} />
+                              <span>{t.switchPhp || 'Cambiar PHP'}</span>
+                            </div>
+                            <ChevronRight size={10} />
+                          </button>
+                        )}
+
+                        {(service.availableVersions?.length > 1 || service.availablePhpVersions?.length > 1) && (
+                          <div className="h-px bg-app-border my-1"></div>
+                        )}
+
+                        {service.configs?.map((conf, idx) => (
+                          <button 
+                            key={idx}
+                            onClick={() => { window.electronAPI.openConfigFile(conf); setMenuOpen(null); }} 
+                            className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
+                          >
+                            {conf.type === 'folder' ? <Folder size={12} /> : <Code size={12} />}
+                            <span className="truncate">{t[conf.label] || conf.label}</span>
+                          </button>
+                        ))}
+                        <div className="h-px bg-app-border my-1"></div>
+                        <button 
+                          onClick={() => { onToggleVisibility(service.name); setMenuOpen(null); }} 
+                          className="w-full text-left px-3 py-1.5 text-xs text-app-danger hover:bg-app-danger/10 flex items-center space-x-2 transition-colors font-bold"
+                        >
+                          <EyeOff size={12} />
+                          <span>{t.hideService}</span>
+                        </button>
+                      </>
+                    ) : (
+                      <div className="animate-in slide-in-from-right-2 duration-75">
+                        <button 
+                          onClick={() => setActiveSubMenu(null)}
+                          className="w-full text-left px-3 py-2 text-[10px] font-black text-app-primary hover:bg-app-primary/5 flex items-center space-x-2 border-b border-app-border uppercase tracking-widest"
+                        >
+                          <ChevronLeft size={12} />
+                          <span>{t.back || 'Volver'}</span>
+                        </button>
+                        <div className="max-h-60 overflow-y-auto py-1 custom-scrollbar">
+                          {activeSubMenu === 'version' ? (
+                            service.availableVersions?.map(v => (
+                              <button
+                                key={v}
+                                onClick={() => handleChangeVersion(service.type, v)}
+                                className={`w-full text-left px-4 py-1.5 text-xs flex items-center justify-between transition-colors ${
+                                  service.version === v 
+                                    ? 'bg-app-primary/10 text-app-primary font-black' 
+                                    : 'text-app-text hover:bg-app-bg'
+                                }`}
+                              >
+                                <span className="truncate">{v}</span>
+                                {service.version === v && <div className="w-1.5 h-1.5 rounded-full bg-app-primary"></div>}
+                              </button>
+                            ))
+                          ) : (
+                            service.availablePhpVersions?.map(v => (
+                              <button
+                                key={v}
+                                onClick={() => handleChangeVersion('php', v)}
+                                className={`w-full text-left px-4 py-1.5 text-xs flex items-center justify-between transition-colors ${
+                                  service.phpVersion === v 
+                                    ? 'bg-app-primary/10 text-app-primary font-black' 
+                                    : 'text-app-text hover:bg-app-bg'
+                                }`}
+                              >
+                                <span className="truncate">{v}</span>
+                                {service.phpVersion === v && <div className="w-1.5 h-1.5 rounded-full bg-app-primary"></div>}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -496,13 +589,28 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
                         <span className={`text-[9px] font-black uppercase tracking-widest ${isRunning ? 'text-app-success/70' : 'text-app-text-muted'}`}>Version</span>
                       </div>
                       <div className="flex items-center space-x-1">
-                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-app-bg text-app-text-muted border border-app-border uppercase tracking-widest">
+                        <span 
+                          title={service.version}
+                          className="text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-app-bg text-app-text-muted border border-app-border uppercase tracking-widest cursor-help hover:border-app-primary/50 hover:text-app-text transition-colors"
+                        >
                           {formatVersion(service.version) || '---'}
                         </span>
                         {service.phpVersion && (
-                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-app-primary/10 text-app-primary border border-app-primary/20 uppercase tracking-widest">
+                          <button 
+                            title={`${t.switchPhp || 'Cambiar PHP'}: ${service.phpVersion}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (service.availablePhpVersions?.length > 1) {
+                                setMenuOpen(service.name);
+                                setActiveSubMenu('php');
+                              }
+                            }}
+                            className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-app-primary/10 text-app-primary border border-app-primary/20 uppercase tracking-widest transition-all ${
+                              service.availablePhpVersions?.length > 1 ? 'cursor-pointer hover:bg-app-primary hover:text-white' : 'cursor-help'
+                            }`}
+                          >
                             PHP {formatVersion(service.phpVersion)}
-                          </span>
+                          </button>
                         )}
                       </div>
                     </div>

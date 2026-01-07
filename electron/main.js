@@ -153,7 +153,32 @@ console.log('Main process starting...');
 function detectServices() {
   const config = getLaragonConfig();
   const services = [];
-  const phpVersion = config.php?.version;
+
+  const getAvailableVersions = (serviceType) => {
+    const pathsToCheck = [serviceType];
+    // Aliases comunes en Laragon
+    if (serviceType === 'mysql') pathsToCheck.push('mariadb');
+    if (serviceType === 'mariadb') pathsToCheck.push('mysql');
+    
+    let allVersions = [];
+
+    for (const type of pathsToCheck) {
+      const binPath = path.join(userConfig.laragonPath, 'bin', type);
+      if (fs.existsSync(binPath)) {
+        try {
+          const dirs = fs.readdirSync(binPath)
+            .filter(f => fs.statSync(path.join(binPath, f)).isDirectory());
+          allVersions = [...allVersions, ...dirs];
+        } catch (e) {}
+      }
+    }
+    
+    // Eliminar duplicados y ordenar descendente
+    return [...new Set(allVersions)].sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+  };
+
+  const availablePhp = getAvailableVersions('php');
+  const phpVersion = config.php?.version || (availablePhp.length > 0 ? availablePhp[0] : undefined);
   
   if (config.apache && config.apache.version) {
     const apacheBase = path.join(userConfig.laragonPath, 'bin', 'apache', config.apache.version);
@@ -162,15 +187,18 @@ function detectServices() {
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
       { label: 'httpd.conf', path: path.join(apacheBase, 'conf', 'httpd.conf') },
       { label: 'httpd-vhosts.conf', path: path.join(apacheBase, 'conf', 'extra', 'httpd-vhosts.conf') },
-      { label: 'php.ini', path: phpVersion ? path.join(userConfig.laragonPath, 'bin', 'php', phpVersion, 'php.ini') : '' }
-    ].filter(c => c.path);
+      { label: 'php.ini', path: phpVersion ? path.join(userConfig.laragonPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
+      { label: 'php_errors.log', path: path.join(userConfig.laragonPath, 'tmp', 'php_errors.log') }
+    ].filter(c => c.path && (c.type === 'folder' || fs.existsSync(c.path)));
 
     services.push({ 
       name: 'Apache', 
       type: 'apache', 
       version: config.apache.version,
       phpVersion: phpVersion,
-      configs: apacheConfigs
+      configs: apacheConfigs,
+      availableVersions: getAvailableVersions('apache'),
+      availablePhpVersions: getAvailableVersions('php')
     });
   }
 
@@ -185,7 +213,8 @@ function detectServices() {
       name: 'MySQL', 
       type: 'mysql', 
       version: config.mysql.version,
-      configs: mysqlConfigs
+      configs: mysqlConfigs,
+      availableVersions: getAvailableVersions('mysql')
     });
   }
 
@@ -195,24 +224,42 @@ function detectServices() {
     const nginxConfigs = [
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
       { label: 'nginx.conf', path: path.join(nginxBase, 'conf', 'nginx.conf') },
-      { label: 'php.ini', path: phpVersion ? path.join(userConfig.laragonPath, 'bin', 'php', phpVersion, 'php.ini') : '' }
-    ].filter(c => c.path);
+      { label: 'php.ini', path: phpVersion ? path.join(userConfig.laragonPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
+      { label: 'php_errors.log', path: path.join(userConfig.laragonPath, 'tmp', 'php_errors.log') }
+    ].filter(c => c.path && (c.type === 'folder' || fs.existsSync(c.path)));
     services.push({ 
       name: 'Nginx', 
       type: 'nginx', 
       version: config.nginx.version, 
       phpVersion: phpVersion,
-      configs: nginxConfigs 
+      configs: nginxConfigs,
+      availableVersions: getAvailableVersions('nginx'),
+      availablePhpVersions: getAvailableVersions('php')
     });
   }
   if (config.postgresql && config.postgresql.version) {
-    services.push({ name: 'PostgreSQL', type: 'postgresql', version: config.postgresql.version });
+    services.push({ 
+      name: 'PostgreSQL', 
+      type: 'postgresql', 
+      version: config.postgresql.version,
+      availableVersions: getAvailableVersions('postgresql')
+    });
   }
   if (config.redis && config.redis.version) {
-    services.push({ name: 'Redis', type: 'redis', version: config.redis.version });
+    services.push({ 
+      name: 'Redis', 
+      type: 'redis', 
+      version: config.redis.version,
+      availableVersions: getAvailableVersions('redis')
+    });
   }
   if (config.memcached && config.memcached.version) {
-    services.push({ name: 'Memcached', type: 'memcached', version: config.memcached.version });
+    services.push({ 
+      name: 'Memcached', 
+      type: 'memcached', 
+      version: config.memcached.version,
+      availableVersions: getAvailableVersions('memcached')
+    });
   }
   
   // Mailpit detection
@@ -220,12 +267,26 @@ function detectServices() {
   if (!mailpitVersion) {
     const mailpitDir = path.join(userConfig.laragonPath, 'bin', 'mailpit');
     if (fs.existsSync(mailpitDir)) {
-      const dirs = fs.readdirSync(mailpitDir).filter(f => fs.statSync(path.join(mailpitDir, f)).isDirectory());
+      const dirs = fs.readdirSync(mailpitDir).filter(f => {
+        const fullPath = path.join(mailpitDir, f);
+        return fs.statSync(fullPath).isDirectory() && fs.existsSync(path.join(fullPath, 'mailpit.exe'));
+      });
       if (dirs.length > 0) mailpitVersion = dirs[0];
     }
   }
   if (mailpitVersion) {
-    services.push({ name: 'Mailpit', type: 'mailpit', version: mailpitVersion });
+    const mailpitBase = path.join(userConfig.laragonPath, 'bin', 'mailpit', mailpitVersion);
+    const mailpitConfigs = [
+      { label: 'mailpit.log', path: path.join(mailpitBase, 'mailpit.log') }
+    ];
+
+    services.push({ 
+      name: 'Mailpit', 
+      type: 'mailpit', 
+      version: mailpitVersion,
+      configs: mailpitConfigs,
+      availableVersions: getAvailableVersions('mailpit')
+    });
   }
 
   // MongoDB detection
@@ -233,12 +294,27 @@ function detectServices() {
   if (!mongodbVersion) {
     const mongodbDir = path.join(userConfig.laragonPath, 'bin', 'mongodb');
     if (fs.existsSync(mongodbDir)) {
-      const dirs = fs.readdirSync(mongodbDir).filter(f => fs.statSync(path.join(mongodbDir, f)).isDirectory());
+      const dirs = fs.readdirSync(mongodbDir).filter(f => {
+        const fullPath = path.join(mongodbDir, f);
+        return fs.statSync(fullPath).isDirectory() && 
+               (fs.existsSync(path.join(fullPath, 'mongod.exe')) || fs.existsSync(path.join(fullPath, 'bin', 'mongod.exe')));
+      });
       if (dirs.length > 0) mongodbVersion = dirs[0];
     }
   }
   if (mongodbVersion) {
-    services.push({ name: 'MongoDB', type: 'mongodb', version: mongodbVersion });
+    const mongodbBase = path.join(userConfig.laragonPath, 'bin', 'mongodb', mongodbVersion);
+    const mongodbConfigs = [
+      { label: 'mongod.cfg', path: path.join(mongodbBase, 'bin', 'mongod.cfg') }
+    ].filter(c => fs.existsSync(c.path));
+
+    services.push({ 
+      name: 'MongoDB', 
+      type: 'mongodb', 
+      version: mongodbVersion,
+      configs: mongodbConfigs,
+      availableVersions: getAvailableVersions('mongodb')
+    });
   }
   
   return services;
@@ -391,6 +467,83 @@ ipcMain.handle('open-hosts', async () => {
   if (command) exec(command);
 });
 
+ipcMain.handle('update-service-version', async (event, { type, version }) => {
+  log(`Updating ${type} version to ${version}`);
+  const possiblePaths = [
+    path.join(userConfig.laragonPath, 'laragon.ini'),
+    path.join(userConfig.laragonPath, 'usr', 'laragon.ini')
+  ];
+
+  let iniPath = possiblePaths[0];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      iniPath = p;
+      break;
+    }
+  }
+
+  try {
+    if (!fs.existsSync(iniPath)) {
+      throw new Error('laragon.ini not found');
+    }
+
+    let content = fs.readFileSync(iniPath, 'utf-8');
+    const lines = content.split(/\r?\n/);
+    let section = '';
+    let updated = false;
+
+    const newLines = lines.map(line => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        section = trimmed.slice(1, -1).toLowerCase();
+      } else if (section === type.toLowerCase() && trimmed.includes('=')) {
+        const [key] = trimmed.split('=');
+        if (key.trim().toLowerCase() === 'version') {
+          updated = true;
+          return `${key}=${version}`;
+        }
+      }
+      return line;
+    });
+
+    if (!updated) {
+      log(`Version key not found in [${type}] section, attempting to add it`, 'WARNING');
+    }
+
+    fs.writeFileSync(iniPath, newLines.join('\n'));
+    log('laragon.ini updated successfully');
+
+    // Si cambiamos PHP, intentar actualizar la configuración de Apache (mod_php.conf)
+    if (type.toLowerCase() === 'php') {
+      try {
+        const modPhpPath = path.join(userConfig.laragonPath, 'etc', 'apache2', 'mod_php.conf');
+        if (fs.existsSync(modPhpPath)) {
+          const phpDir = path.join(userConfig.laragonPath, 'bin', 'php', version);
+          if (fs.existsSync(phpDir)) {
+            const files = fs.readdirSync(phpDir);
+            const phpDll = files.find(f => f.match(/^php\d+apache2_4\.dll$/i));
+            
+            if (phpDll) {
+              const newContent = `# This file is generated by MyLaragon\n` +
+                                `LoadModule php_module "${path.join(phpDir, phpDll).replace(/\\/g, '/')}"\n` +
+                                `PHPIniDir "${phpDir.replace(/\\/g, '/')}"\n`;
+              fs.writeFileSync(modPhpPath, newContent);
+              log('mod_php.conf updated successfully');
+            }
+          }
+        }
+      } catch (e) {
+        log(`Failed to update mod_php.conf: ${e.message}`, 'WARNING');
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    log(`Error updating laragon.ini: ${error.message}`, 'ERROR');
+    return { success: false, message: error.message };
+  }
+});
+
 ipcMain.handle('open-env-vars', async () => {
   exec('rundll32.exe sysdm.cpl,EditEnvironmentVariables');
 });
@@ -531,60 +684,89 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
 }
 
 async function startService(service) {
+  // Asegurarnos de cerrar cualquier instancia previa del mismo tipo de proceso 
+  // para evitar conflictos de versión o puertos
+  try {
+    const processToKill = {
+      'apache': 'httpd.exe',
+      'nginx': 'nginx.exe',
+      'mysql': 'mysqld.exe',
+      'mariadb': 'mysqld.exe',
+      'redis': 'redis-server.exe',
+      'memcached': 'memcached.exe',
+      'mailpit': 'mailpit.exe',
+      'mongodb': 'mongod.exe'
+    }[service.type];
+
+    if (processToKill) {
+      log(`Cleaning up old ${processToKill} before starting version ${service.version}...`);
+      await execAsync(`taskkill /F /IM ${processToKill}`).catch(() => {}); // Ignorar error si no hay procesos
+    }
+  } catch (e) {
+    log(`Cleanup failed: ${e.message}`, 'WARNING');
+  }
+
   let binPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version);
   if (fs.existsSync(path.join(binPath, 'bin'))) {
     binPath = path.join(binPath, 'bin');
   }
   
-  console.log('Starting service:', service.name, 'binPath:', binPath);
+  const executableMapping = {
+    'apache': 'httpd.exe',
+    'nginx': 'nginx.exe',
+    'mysql': 'mysqld.exe',
+    'mariadb': 'mysqld.exe',
+    'redis': 'redis-server.exe',
+    'memcached': 'memcached.exe',
+    'mailpit': 'mailpit.exe',
+    'mongodb': 'mongod.exe'
+  };
+
+  const exeName = executableMapping[service.type];
+  const fullExePath = path.join(binPath, exeName);
+
+  if (!fs.existsSync(fullExePath)) {
+    throw new Error(`No se encontró el ejecutable en: ${fullExePath}`);
+  }
+
+  log(`Garantizando inicio de ${service.name} usando: ${fullExePath}`);
   
   switch (service.type) {
     case 'apache':
-      console.log('Executing apache start');
-      const httpdPath = path.join(binPath, 'httpd.exe');
       const confPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'conf', 'httpd.conf');
-      const apacheProcess = spawn(httpdPath, ['-f', confPath], { cwd: binPath, detached: true, stdio: 'ignore' });
+      const apacheProcess = spawn(fullExePath, ['-f', confPath], { cwd: binPath, detached: true, stdio: 'ignore' });
       apacheProcess.unref();
       break;
     case 'nginx':
-      const nginxProcess = spawn(path.join(binPath, 'nginx.exe'), [], { cwd: binPath, detached: true, stdio: 'ignore' });
+      const nginxProcess = spawn(fullExePath, [], { cwd: binPath, detached: true, stdio: 'ignore' });
       nginxProcess.unref();
       break;
     case 'mysql':
     case 'mariadb':
       const myIni = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'my.ini');
-      const mysqlProcess = spawn(path.join(binPath, 'mysqld.exe'), ['--defaults-file=' + myIni, '--standalone'], { cwd: binPath, detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+      const mysqlProcess = spawn(fullExePath, ['--defaults-file=' + myIni, '--standalone'], { cwd: binPath, detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
       mysqlProcess.stderr.on('data', (data) => {
-        console.error('MySQL stderr:', data.toString());
+        log(`MySQL stderr: ${data.toString()}`, 'ERROR');
       });
-      mysqlProcess.stdout.on('data', (data) => {
-        console.log('MySQL stdout:', data.toString());
-      });
-      mysqlProcess.on('exit', (code) => {
-        console.log('MySQL exited with code:', code);
-      });
-      // No unref, let it run
-      break;
-    case 'postgresql':
-      // PostgreSQL es más complejo, requiere pg_ctl
+      // Dejamos que corra en background sin unref para monitorear errores iniciales
       break;
     case 'redis':
       const redisConf = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'redis.conf');
-      const redisProcess = spawn(path.join(binPath, 'redis-server.exe'), [redisConf], { cwd: binPath, detached: true, stdio: 'ignore' });
+      const redisProcess = spawn(fullExePath, [redisConf], { cwd: binPath, detached: true, stdio: 'ignore' });
       redisProcess.unref();
       break;
     case 'memcached':
-      const memcachedProcess = spawn(path.join(binPath, 'memcached.exe'), [], { cwd: binPath, detached: true, stdio: 'ignore' });
+      const memcachedProcess = spawn(fullExePath, [], { cwd: binPath, detached: true, stdio: 'ignore' });
       memcachedProcess.unref();
       break;
     case 'mailpit':
-      const mailpitProcess = spawn(path.join(binPath, 'mailpit.exe'), [], { cwd: binPath, detached: true, stdio: 'ignore' });
+      const mailpitProcess = spawn(fullExePath, [], { cwd: binPath, detached: true, stdio: 'ignore' });
       mailpitProcess.unref();
       break;
     case 'mongodb':
       const mongoDataPath = path.join(userConfig.laragonPath, 'data', 'mongodb');
       if (!fs.existsSync(mongoDataPath)) fs.mkdirSync(mongoDataPath, { recursive: true });
-      const mongoProcess = spawn(path.join(binPath, 'mongod.exe'), ['--dbpath', mongoDataPath], { cwd: binPath, detached: true, stdio: 'ignore' });
+      const mongoProcess = spawn(fullExePath, ['--dbpath', mongoDataPath], { cwd: binPath, detached: true, stdio: 'ignore' });
       mongoProcess.unref();
       break;
   }
@@ -593,29 +775,29 @@ async function startService(service) {
 async function stopService(service) {
   switch (service.type) {
     case 'apache':
-      await execAsync('taskkill /F /IM httpd.exe');
+      await execAsync('taskkill /IM httpd.exe');
       break;
     case 'nginx':
-      await execAsync('taskkill /F /IM nginx.exe');
+      await execAsync('taskkill /IM nginx.exe');
       break;
     case 'mysql':
     case 'mariadb':
-      await execAsync('taskkill /F /IM mysqld.exe');
+      await execAsync('taskkill /IM mysqld.exe');
       break;
     case 'postgresql':
       // pg_ctl stop
       break;
     case 'redis':
-      await execAsync('taskkill /F /IM redis-server.exe');
+      await execAsync('taskkill /IM redis-server.exe');
       break;
     case 'memcached':
-      await execAsync('taskkill /F /IM memcached.exe');
+      await execAsync('taskkill /IM memcached.exe');
       break;
     case 'mailpit':
-      await execAsync('taskkill /F /IM mailpit.exe');
+      await execAsync('taskkill /IM mailpit.exe');
       break;
     case 'mongodb':
-      await execAsync('taskkill /F /IM mongod.exe');
+      await execAsync('taskkill /IM mongod.exe');
       break;
   }
 }

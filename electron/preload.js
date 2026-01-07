@@ -31,4 +31,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openTerminal: () => ipcRenderer.invoke('open-terminal'),
   openHosts: () => ipcRenderer.invoke('open-hosts'),
   openEnvVars: () => ipcRenderer.invoke('open-env-vars'),
+  updateServiceVersion: (type, version) => ipcRenderer.invoke('update-service-version', { type, version }),
 });

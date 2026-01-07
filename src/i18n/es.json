@@ -73,5 +73,8 @@
   "active": "Activo",
   "idle": "Inactivo",
   "running": "Ejecutando",
-  "stopped": "Detenido"
+  "stopped": "Detenido",
+  "switchVersion": "Cambiar Versión",
+  "switchPhp": "Cambiar PHP",
+  "back": "Volver"
 }
