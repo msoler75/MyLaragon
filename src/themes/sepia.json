@@ -1,0 +1,17 @@
+{
+  "name": "Sepia",
+  "colors": {
+    "background": "#f4ecd8",
+    "surface": "#fdf6e3",
+    "border": "#e1d4b7",
+    "text-primary": "#5b4636",
+    "text-secondary": "#8c7862",
+    "text-muted": "#a69584",
+    "primary": "#a6611a",
+    "primary-text": "#fdf6e3",
+    "secondary": "#8c7862",
+    "success": "#637d4a",
+    "warning": "#d4a017",
+    "danger": "#b22222"
+  }
+}

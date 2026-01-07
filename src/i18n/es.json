@@ -48,6 +48,12 @@
   "saveChanges": "Guardar cambios",
   "saveSuccess": "Configuración guardada correctamente",
   "language": "Idioma",
+  "appearance": "Apariencia",
+  "theme": "Tema",
+  "themeSystem": "Sistema (Auto)",
+  "themeLight": "Claro",
+  "themeDark": "Oscuro",
+  "themeSepia": "Sepia",
   "editorDefault": "Notepad (Por defecto)",
   "editorVSCode": "VS Code",
   "editorNpp": "Notepad++ (Laragon)",
@@ -59,5 +65,7 @@
   "statusStopped": "Detenido",
   "statusWarning": "Conflicto",
   "statusError": "Error",
-  "OPEN_DOCROOT": "Abrir DocumentRoot"
+  "OPEN_DOCROOT": "Abrir DocumentRoot",
+  "startAll": "Activar todos",
+  "stopAll": "Detener todos"
 }

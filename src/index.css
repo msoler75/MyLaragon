@@ -1,7 +1,33 @@
 @import "tailwindcss";
 
+@theme {
+  --color-app-bg: var(--app-background);
+  --color-app-surface: var(--app-surface);
+  --color-app-border: var(--app-border);
+  --color-app-text: var(--app-text-primary);
+  --color-app-text-muted: var(--app-text-secondary);
+  --color-app-primary: var(--app-primary);
+  --color-app-primary-text: var(--app-primary-text);
+  --color-app-success: var(--app-success);
+  --color-app-warning: var(--app-warning);
+  --color-app-danger: var(--app-danger);
+}
+
 :root {
   font-family: Inter, system-ui, sans-serif;
+  
+  /* Fallbacks (Dark by default to avoid white flash) */
+  --app-background: #0f172a;
+  --app-surface: #1e293b;
+  --app-border: #334155;
+  --app-text-primary: #f8fafc;
+  --app-text-secondary: #cbd5e1;
+  --app-text-muted: #64748b;
+  --app-primary: #3b82f6;
+  --app-primary-text: #ffffff;
+  --app-success: #10b981;
+  --app-warning: #f59e0b;
+  --app-danger: #ef4444;
 }
 
 html, body, #root {
@@ -10,5 +36,8 @@ html, body, #root {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  background-color: var(--app-background);
+  color: var(--app-text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 

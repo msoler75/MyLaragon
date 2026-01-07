@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect, useRef, useCallback } from 'react'
 import { 
   Activity, 
   Folder, 
@@ -22,6 +22,7 @@ import {
   Zap,
   MoreVertical,
   Terminal,
+  SquareTerminal,
   FileText,
   Cpu
 } from 'lucide-react'
@@ -41,16 +42,52 @@ Object.entries(languageFiles).forEach(([path, content]) => {
   });
 });
 
+// Detección automática de temas
+const themeFiles = import.meta.glob('./themes/*.json', { eager: true });
+const themes = {};
+Object.entries(themeFiles).forEach(([path, content]) => {
+  const themeKey = path.split('/').pop().replace('.json', '');
+  themes[themeKey] = content.default || content;
+});
+
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [services, setServices] = useState([])
-  const [config, setConfig] = useState({ language: 'es' })
+  const [config, setConfig] = useState({ language: 'es', theme: 'system' })
   const [loading, setLoading] = useState(false)
   const [processingServices, setProcessingServices] = useState([])
+  const [isBulkRunning, setIsBulkRunning] = useState(false)
   const [hiddenServices, setHiddenServices] = useState(() => {
     const saved = localStorage.getItem('hiddenServices')
     return saved ? JSON.parse(saved) : []
   })
+
+  // Aplicar tema
+  useEffect(() => {
+    const applyTheme = (themeKey) => {
+      let activeTheme = themeKey;
+      if (themeKey === 'system') {
+        activeTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      
+      const themeData = themes[activeTheme] || themes.light;
+      if (themeData && themeData.colors) {
+        const root = document.documentElement;
+        Object.entries(themeData.colors).forEach(([key, value]) => {
+          root.style.setProperty(`--app-${key}`, value);
+        });
+      }
+    };
+
+    applyTheme(config.theme);
+
+    if (config.theme === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = () => applyTheme('system');
+      mediaQuery.addEventListener('change', listener);
+      return () => mediaQuery.removeEventListener('change', listener);
+    }
+  }, [config.theme]);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -67,33 +104,40 @@ function App() {
     loadServices()
   }, [hiddenServices])
 
+  // Sistema de actualización inteligente: pausa durante acciones para evitar parpadeos y race conditions
   useEffect(() => {
-    const interval = setInterval(loadServices, 7000)
-    return () => clearInterval(interval)
-  }, [hiddenServices])
+    if (processingServices.length === 0) {
+      const interval = setInterval(loadServices, 7000)
+      return () => clearInterval(interval)
+    }
+  }, [hiddenServices, processingServices.length])
 
   const t = translations[config.language] || translations.es
-  const loadServices = async () => {
-    if (window.electronAPI) {
+
+  const refreshingRef = useRef(false);
+  const loadServices = useCallback(async () => {
+    if (window.electronAPI && !refreshingRef.current) {
+      refreshingRef.current = true;
       setLoading(true)
       try {
         const servicesData = await window.electronAPI.getServices(hiddenServices)
+        // Solo actualizamos si no hay acciones en curso que puedan ser invalidadas
         setServices(servicesData)
       } catch (error) {
         console.error('Error loading services:', error)
       } finally {
         setLoading(false)
+        refreshingRef.current = false;
       }
     }
-  }
+  }, [hiddenServices]);
 
   const handleStartService = async (serviceName) => {
-    if (window.electronAPI) {
+    if (window.electronAPI && !processingServices.includes(serviceName)) {
       try {
         setProcessingServices(prev => [...prev, serviceName])
-        console.log('Starting service:', serviceName);
         await window.electronAPI.startService(serviceName);
-        // Esperar un tiempo prudencial para que el proceso se asiente antes de permitir refrescos
+        // Espera prudencial y recarga forzada
         await new Promise(resolve => setTimeout(resolve, 2500));
         await loadServices();
       } catch (error) {
@@ -105,11 +149,11 @@ function App() {
   }
 
   const handleStopService = async (serviceName) => {
-    if (window.electronAPI) {
+    if (window.electronAPI && !processingServices.includes(serviceName)) {
       try {
         setProcessingServices(prev => [...prev, serviceName])
         await window.electronAPI.stopService(serviceName)
-        // Esperar un tiempo prudencial para el cierre limpio
+        // Espera para cierre limpio y recarga
         await new Promise(resolve => setTimeout(resolve, 1500));
         await loadServices()
       } catch (error) {
@@ -129,49 +173,49 @@ function App() {
   }
 
   const menuItems = [
-    { id: 'dashboard', label: t.dashboard, icon: Activity },
+    { id: 'dashboard', label: t.dashboard, icon: Zap },
     { id: 'tools', label: t.tools, icon: Wrench },
     { id: 'settings', label: t.settings, icon: SettingsIcon },
   ]
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="flex h-screen bg-app-bg text-app-text font-sans transition-colors duration-300 overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-white flex flex-col shadow-xl">
-        <div className="p-6 flex items-center space-x-3 border-b border-slate-800">
-          <div className="bg-blue-500 p-2 rounded-lg">
-            <Server size={24} className="text-white" />
+      <aside className="w-52 bg-app-surface border-r border-app-border flex flex-col shadow-xl z-50 transition-all duration-300">
+        <div className="p-4 flex items-center space-x-2 border-b border-app-border">
+          <div className="bg-app-primary p-2 rounded-xl shadow-lg shadow-app-primary/20">
+            <Activity size={20} className="text-app-primary-text" />
           </div>
-          <h2 className="text-xl font-bold tracking-tight">MyLaragon</h2>
+          <h2 className="text-lg font-black tracking-tight uppercase">{t.appName || 'MyLaragon'}</h2>
         </div>
         
-        <nav className="flex-1 mt-6 px-4 space-y-2">
+        <nav className="flex-1 mt-4 px-3 space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon
             return (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center w-full space-x-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
+                className={`flex items-center w-full space-x-3 px-3 py-2.5 rounded-xl transition-all duration-300 group ${
                   activeTab === item.id 
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' 
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                    ? 'bg-app-primary text-app-primary-text shadow-lg shadow-app-primary/20' 
+                    : 'text-app-text-muted hover:bg-app-bg hover:text-app-text'
                 }`}
               >
-                <Icon size={20} className={activeTab === item.id ? 'text-white' : 'group-hover:text-white'} />
-                <span className="font-medium">{item.label}</span>
+                <Icon size={18} />
+                <span className="font-bold uppercase tracking-wider text-xs">{item.label}</span>
               </button>
             )
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
-          <div className="bg-slate-800/50 rounded-xl p-4">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-              <span>{t.globalStatus}</span>
-              <span className="flex h-2 w-2 rounded-full bg-green-500"></span>
+        <div className="p-3 border-t border-app-border">
+          <div className="bg-app-bg/50 rounded-xl p-3 border border-app-border">
+            <div className="flex items-center justify-between text-[10px] text-app-text-muted mb-1.5 font-black uppercase tracking-widest">
+              <span>{t.globalStatus || 'ESTADO'}</span>
+              <span className="flex h-1.5 w-1.5 rounded-full bg-app-success animate-pulse"></span>
             </div>
-            <p className="text-sm font-semibold">Laragon Online</p>
+            <p className="text-xs font-bold truncate">Laragon Online</p>
           </div>
         </div>
       </aside>
@@ -179,17 +223,15 @@ function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8 shrink-0">
+        <header className="bg-app-surface border-b border-app-border h-16 flex items-center justify-between px-8 shrink-0 z-40">
           <div className="flex items-center space-x-3">
-            <h1 className="text-xl font-extrabold text-slate-900 tracking-tight uppercase">{t[activeTab]}</h1>
-            <div className="h-4 w-px bg-slate-200 mx-2"></div>
-            <span className="text-slate-400 text-sm font-medium">{t.panelControl}</span>
+            <h1 className="text-xl font-black text-app-text tracking-tight uppercase">{t[activeTab]}</h1>
           </div>
           
           <div className="flex items-center space-x-4">
             <button 
               onClick={loadServices}
-              className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+              className="p-2 hover:bg-app-bg border border-transparent hover:border-app-border rounded-xl text-app-text-muted hover:text-app-text transition-all"
               title={t.refresh}
             >
               <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
@@ -198,16 +240,38 @@ function App() {
         </header>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-6xl mx-auto">
+        <div className="flex-1 overflow-y-auto p-8 relative">
+          <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
             {activeTab === 'dashboard' && (
               <Services 
                 services={services} 
                 hiddenServices={hiddenServices}
                 processingServices={processingServices}
+                isBulkRunning={isBulkRunning}
+                loading={loading}
                 onToggleVisibility={toggleServiceVisibility}
                 onStart={handleStartService} 
-                onStop={handleStopService} 
+                onStop={handleStopService}
+                onStartAll={async () => {
+                  if (window.electronAPI) {
+                    setIsBulkRunning(true)
+                    const current = await window.electronAPI.getServices(hiddenServices)
+                    setServices(current)
+                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status !== 'running')
+                    await Promise.all(visible.map(s => handleStartService(s.name)))
+                    setIsBulkRunning(false)
+                  }
+                }}
+                onStopAll={async () => {
+                  if (window.electronAPI) {
+                    setIsBulkRunning(true)
+                    const current = await window.electronAPI.getServices(hiddenServices)
+                    setServices(current)
+                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status === 'running')
+                    await Promise.all(visible.map(s => handleStopService(s.name)))
+                    setIsBulkRunning(false)
+                  }
+                }}
                 t={t}
               />
             )}
@@ -227,105 +291,93 @@ function App() {
   )
 }
 
-function Services({ services, hiddenServices, processingServices = [], onToggleVisibility, onStart, onStop, t }) {
+function Services({ services, hiddenServices, processingServices = [], isBulkRunning, loading, onToggleVisibility, onStart, onStop, onStartAll, onStopAll, t }) {
   const [showHidden, setShowHidden] = useState(false)
   const [menuOpen, setMenuOpen] = useState(null)
   
   const visibleServices = services.filter(s => !hiddenServices.includes(s.name))
   const hiddenList = services.filter(s => hiddenServices.includes(s.name))
+  
+  const canStartAll = visibleServices.some(s => s.status !== 'running')
+  const canStopAll = visibleServices.some(s => s.status === 'running')
 
   const getServiceIcon = (type) => {
-    const iconProps = { size: 24 };
+    const iconProps = { size: 18 };
     switch (type?.toLowerCase()) {
       case 'apache':
-      case 'nginx':
-        return <Globe {...iconProps} />;
+      case 'nginx': return <Globe {...iconProps} />;
       case 'mysql':
       case 'mariadb':
-      case 'mongodb':
-        return <Database {...iconProps} />;
-      case 'redis':
-        return <Zap {...iconProps} />;
-      case 'mailpit':
-        return <Mail {...iconProps} />;
-      case 'memcached':
-        return <Wind {...iconProps} />;
-      default:
-        return <Server {...iconProps} />;
+      case 'mongodb': return <Database {...iconProps} />;
+      case 'redis': return <Zap {...iconProps} />;
+      case 'mailpit': return <Mail {...iconProps} />;
+      case 'memcached': return <Wind {...iconProps} />;
+      default: return <Server {...iconProps} />;
     }
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-end space-x-3 mb-6">
+    <div className="space-y-4 pb-10">
+      <div className="flex items-center justify-end space-x-2 mb-2">
         <button 
           onClick={() => window.electronAPI.openLaragonFolder()}
-          className="flex items-center space-x-2 bg-white px-4 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 shadow-sm hover:bg-slate-50 transition-all"
-          title={t.laragonRoot}
+          className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
         >
-          <Folder size={16} />
+          <Folder size={12} />
           <span>Laragon</span>
         </button>
         <button 
           onClick={() => window.electronAPI.openDocumentRoot()}
-          className="flex items-center space-x-2 bg-white px-4 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 shadow-sm hover:bg-slate-50 transition-all"
-          title={t.projectsRoot}
+          className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
         >
-          <ExternalLink size={16} />
+          <ExternalLink size={12} />
           <span>WWW</span>
         </button>
-        <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 shadow-sm">
-          <Activity size={12} className="text-green-500" />
+        <div className="flex items-center space-x-2 bg-app-surface px-2.5 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm uppercase tracking-widest">
+          <Activity size={10} className="text-app-success" />
           <span>{services.filter(s => s.status === 'running').length}/{services.length} {t.activeServices}</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {visibleServices.map(service => {
           const isProcessing = processingServices.includes(service.name);
           return (
-            <div key={service.name} className="group bg-white rounded-2xl shadow-sm border border-slate-200 p-4 hover:shadow-lg hover:border-blue-200 transition-all duration-300 relative flex flex-col h-full">
+            <div key={service.name} className="group bg-app-surface rounded-2xl shadow-sm border border-app-border p-4 hover:shadow-lg hover:border-app-primary/30 transition-all duration-300 relative flex flex-col h-full">
               <button 
                 onClick={() => setMenuOpen(menuOpen === service.name ? null : service.name)}
-                className={`absolute top-3 right-3 p-1.5 rounded-lg transition-all z-20 ${
+                className={`absolute top-3 right-3 p-1 rounded-lg transition-all z-20 ${
                   menuOpen === service.name 
-                    ? 'bg-slate-900 text-white shadow-lg' 
-                    : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50 opacity-0 group-hover:opacity-100'
+                    ? 'bg-app-text text-app-bg shadow-lg' 
+                    : 'text-app-text-muted hover:text-app-text hover:bg-app-bg opacity-0 group-hover:opacity-100'
                 }`}
-                title={t.configurations}
               >
                 <MoreVertical size={14} />
               </button>
 
               {menuOpen === service.name && (
                 <>
-                  {/* Backdrop para cerrar menu */}
                   <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(null)}></div>
-                  
-                  {/* Dropdown Menu Real */}
-                  <div className="absolute top-12 right-3 w-48 bg-white border border-slate-200 rounded-xl shadow-2xl z-40 py-2 animate-in fade-in zoom-in-95 duration-100 origin-top-right">
-                    <div className="px-3 py-1.5 mb-1 border-b border-slate-50">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{t.configurations}</span>
+                  <div className="absolute top-10 right-3 w-44 bg-app-surface border border-app-border rounded-xl shadow-2xl z-40 py-1.5 animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+                    <div className="px-3 py-1 mb-1 border-b border-app-border">
+                      <span className="text-[10px] font-black text-app-text-muted uppercase tracking-wider">{t.configurations}</span>
                     </div>
-                    
                     {service.configs?.map((conf, idx) => (
                       <button 
                         key={idx}
                         onClick={() => { window.electronAPI.openConfigFile(conf); setMenuOpen(null); }} 
-                        className="w-full text-left px-4 py-2 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-600 flex items-center space-x-2 transition-colors font-medium"
+                        className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
                       >
-                        {conf.type === 'folder' ? <Folder size={14} /> : <Code size={14} />}
-                        <span>{t[conf.label] || conf.label}</span>
+                        {conf.type === 'folder' ? <Folder size={12} /> : <Code size={12} />}
+                        <span className="truncate">{t[conf.label] || conf.label}</span>
                       </button>
                     ))}
-
-                    <div className="h-px bg-slate-100 my-1"></div>
-                    
+                    <div className="h-px bg-app-border my-1"></div>
                     <button 
                       onClick={() => { onToggleVisibility(service.name); setMenuOpen(null); }} 
-                      className="w-full text-left px-4 py-2 text-xs text-rose-500 hover:bg-rose-50 flex items-center space-x-2 transition-colors font-medium"
+                      className="w-full text-left px-3 py-1.5 text-xs text-app-danger hover:bg-app-danger/10 flex items-center space-x-2 transition-colors font-bold"
                     >
-                      <EyeOff size={14} />
+                      <EyeOff size={12} />
                       <span>{t.hideService}</span>
                     </button>
                   </div>
@@ -333,171 +385,159 @@ function Services({ services, hiddenServices, processingServices = [], onToggleV
               )}
 
               <div className="flex items-center space-x-3 mb-3">
-                <div className={`p-2.5 rounded-xl transition-all duration-500 ${
+                <div className={`p-2 rounded-xl transition-all duration-500 shrink-0 ${
                   isProcessing 
-                    ? 'bg-blue-50 text-blue-500 animate-pulse'
+                    ? 'bg-app-primary/10 text-app-primary animate-pulse'
                     : service.status === 'running' 
-                      ? 'bg-green-50 text-green-600' 
-                      : 'bg-slate-50 text-slate-400'
+                      ? 'bg-app-success/10 text-app-success shadow-inner' 
+                      : 'bg-app-bg text-app-text-muted border border-app-border'
                 }`}>
                   {getServiceIcon(service.type)}
                 </div>
                 <div className="overflow-hidden">
-                  <h3 className="text-base font-black text-slate-800 tracking-tight truncate">{service.name}</h3>
-                  <div className="flex items-center space-x-1.5">
-                    <span className={`h-1.5 w-1.5 rounded-full ${
+                  <h3 className="text-base font-black text-app-text tracking-tight truncate uppercase italic">{service.name}</h3>
+                  <div className="flex items-center space-x-1">
+                    <span className={`h-1 w-1 rounded-full ${
                       isProcessing 
-                        ? 'bg-blue-400 animate-bounce' 
-                        : service.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-slate-300'
+                        ? 'bg-app-primary animate-bounce' 
+                        : service.status === 'running' ? 'bg-app-success animate-pulse' : 'bg-app-text-muted'
                     }`}></span>
-                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-app-text-muted">
                       {isProcessing ? t.processing : service.status === 'running' ? t.online : t.offline}
                     </span>
                   </div>
                 </div>
               </div>
               
-              <div className="bg-slate-50/50 rounded-xl p-3 flex flex-col justify-center space-y-2.5 border border-slate-100/50 mb-3 flex-grow">
+              <div className="bg-app-bg/50 rounded-xl p-2 flex flex-col justify-center space-y-1.5 border border-app-border mb-3 grow">
                 {isProcessing ? (
-                  <div className="flex-1 flex flex-col items-center justify-center space-y-2">
-                    <RefreshCw size={16} className="text-blue-500 animate-spin" />
-                    <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">{t.syncing}</span>
+                  <div className="flex-1 flex flex-col items-center justify-center space-y-1 py-2">
+                    <RefreshCw size={14} className="text-app-primary animate-spin" />
+                    <span className="text-[9px] font-black text-app-primary uppercase tracking-widest">{t.syncing}</span>
                   </div>
                 ) : (
                   <>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <div className={`w-2 h-2 rounded-full ${service.portInUse ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`}></div>
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">{t.portShort} {service.port || '---'}</span>
+                        <div className={`w-1 h-1 rounded-full ${service.portInUse ? 'bg-app-success shadow-[0_0_6px_var(--app-success)]' : 'bg-app-text-muted'}`}></div>
+                        <span className="text-[9px] font-black text-app-text-muted uppercase tracking-widest">{t.portShort} {service.port || '---'}</span>
                       </div>
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${service.portInUse ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                      <span className={`text-[8px] font-black px-1 py-0.5 rounded-lg uppercase tracking-widest ${service.portInUse ? 'bg-app-success/20 text-app-success' : 'bg-app-bg text-app-text-muted border border-app-border'}`}>
                         {service.portInUse ? 'ACTIVE' : 'IDLE'}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <div className={`w-2 h-2 rounded-full ${service.processRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`}></div>
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider truncate max-w-[100px]">{service.processName || t.process}</span>
+                        <div className={`w-1 h-1 rounded-full ${service.processRunning ? 'bg-app-success shadow-[0_0_6px_var(--app-success)]' : 'bg-app-text-muted'}`}></div>
+                        <span className="text-[9px] font-black text-app-text-muted uppercase tracking-widest truncate max-w-20">{service.processName || t.process}</span>
                       </div>
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${service.processRunning ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                      <span className={`text-[8px] font-black px-1 py-0.5 rounded-lg uppercase tracking-widest ${service.processRunning ? 'bg-app-success/20 text-app-success' : 'bg-app-bg text-app-text-muted border border-app-border'}`}>
                         {service.processRunning ? 'RUNNING' : 'STOPPED'}
                       </span>
                     </div>
-
-                    {service.status === 'port_occupied_by_other' && (
-                      <div className="flex items-center justify-center space-x-2 bg-rose-50 p-1.5 rounded-lg border border-rose-100 animate-pulse mt-0.5">
-                        <Activity size={12} className="text-rose-600" />
-                        <span className="text-[9px] font-black text-rose-600 uppercase tracking-tight">{t.statusWarning}</span>
-                      </div>
-                    )}
                   </>
                 )}
               </div>
 
-              {service.name === 'Mailpit' && service.status === 'running' && !isProcessing && (
-                <button
-                  onClick={() => window.electronAPI.openInBrowser('http://localhost:8025')}
-                  className="w-full py-1.5 bg-purple-50 text-purple-600 hover:bg-purple-600 hover:text-white rounded-lg text-[9px] font-black border border-purple-100 transition-all flex items-center justify-center space-x-2 uppercase mb-2 animate-in fade-in zoom-in-95 duration-200"
-                >
-                  <ExternalLink size={10} />
-                  <span>{t.openMail}</span>
-                </button>
-              )}
-
-              {service.type === 'apache' && service.status === 'running' && !isProcessing && (
-                <button
-                  onClick={() => window.electronAPI.openInBrowser('http://localhost')}
-                  className="w-full py-1.5 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white rounded-lg text-[9px] font-black border border-green-100 transition-all flex items-center justify-center space-x-2 uppercase mb-2 animate-in fade-in zoom-in-95 duration-200"
-                >
-                  <Globe size={10} />
-                  <span>{t.openWeb}</span>
-                </button>
-              )}
-
-              {service.type === 'mysql' && service.status === 'running' && !isProcessing && (
-                <button
-                  onClick={() => window.electronAPI.openDbTool()}
-                  className="w-full py-1.5 bg-orange-50 text-orange-600 hover:bg-orange-600 hover:text-white rounded-lg text-[9px] font-black border border-orange-100 transition-all flex items-center justify-center space-x-2 uppercase mb-2 animate-in fade-in zoom-in-95 duration-200"
-                >
-                  <Database size={10} />
-                  <span>{t.openDb}</span>
-                </button>
-              )}
+              <div className="space-y-1.5 mb-3">
+                {service.name === 'Mailpit' && service.status === 'running' && !isProcessing && (
+                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost:8025')} className="w-full py-1.5 bg-app-primary/10 text-app-primary hover:bg-app-primary hover:text-white rounded-lg text-[10px] font-black border border-app-primary/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest">
+                    <ExternalLink size={10} /><span>{t.openMail}</span>
+                  </button>
+                )}
+                {service.type === 'apache' && service.status === 'running' && !isProcessing && (
+                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost')} className="w-full py-1.5 bg-app-success/10 text-app-success hover:bg-app-success hover:text-white rounded-lg text-[10px] font-black border border-app-success/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest">
+                    <Globe size={10} /><span>{t.openWeb}</span>
+                  </button>
+                )}
+                {service.type === 'mysql' && service.status === 'running' && !isProcessing && (
+                  <button onClick={() => window.electronAPI.openDbTool()} className="w-full py-1.5 bg-app-warning/10 text-app-warning hover:bg-app-warning hover:text-white rounded-lg text-[10px] font-black border border-app-warning/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest">
+                    <Database size={10} /><span>{t.openDb}</span>
+                  </button>
+                )}
+              </div>
               
               <button
-                disabled={isProcessing}
-                onClick={() => {
-                  if (service.status === 'running') {
-                    onStop(service.name);
-                  } else {
-                    onStart(service.name);
-                  }
-                }}
-                className={`w-full py-2.5 rounded-xl font-black flex items-center justify-center space-x-2 transition-all duration-300 transform active:scale-95 border-b-2 mt-auto ${
-                  isProcessing 
-                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed translate-y-0.5 border-b-0'
+                disabled={isProcessing || loading}
+                onClick={() => service.status === 'running' ? onStop(service.name) : onStart(service.name)}
+                className={`w-full py-2 rounded-xl font-black flex items-center justify-center space-x-2 transition-all duration-300 transform active:scale-95 border-b-2 mt-auto uppercase tracking-widest text-xs ${
+                  isProcessing || loading
+                    ? 'bg-app-bg text-app-text-muted border-app-border cursor-not-allowed translate-y-1 border-b-0 opacity-60'
                     : service.status === 'running'
-                      ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-600 hover:text-white hover:border-rose-700'
-                      : 'bg-blue-600 text-white border-blue-800 hover:bg-blue-700 shadow-md shadow-blue-100'
+                      ? 'bg-app-danger/10 text-app-danger border-app-danger/30 hover:bg-app-danger hover:text-white hover:border-app-danger'
+                      : 'bg-app-primary text-white border-app-primary/50 hover:bg-app-primary/90 shadow-lg shadow-app-primary/10'
                 }`}
               >
                 {isProcessing ? (
-                  <>
-                    <RefreshCw size={14} className="animate-spin" />
-                    <span className="text-[10px] tracking-widest uppercase">{t.wait}</span>
-                  </>
+                  <><RefreshCw size={14} className="animate-spin" /><span>{t.wait}</span></>
                 ) : service.status === 'running' ? (
-                  <>
-                    <Square size={14} fill="currentColor" />
-                    <span className="text-xs">STOP</span>
-                  </>
+                  <><Square size={14} fill="currentColor" /><span>{t.stop}</span></>
                 ) : (
-                  <>
-                    <Play size={14} fill="currentColor" />
-                    <span className="text-xs">START</span>
-                  </>
+                  <><Play size={14} fill="currentColor" /><span>{t.start}</span></>
                 )}
               </button>
             </div>
-          );
+          )
         })}
       </div>
 
-      {visibleServices.length === 0 && hiddenList.length > 0 && (
-        <div className="text-center py-10 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-          <p className="text-slate-400 font-medium">{t.allHidden}</p>
-        </div>
-      )}
+      <div className="flex justify-center space-x-8 pt-4 sticky bottom-0 bg-linear-to-t from-app-bg via-app-bg to-transparent pb-4 z-10">
+        <button 
+          onClick={onStartAll}
+          disabled={!canStartAll || loading || isBulkRunning}
+          className={`px-8 flex items-center justify-center space-x-2 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+            !canStartAll || loading || isBulkRunning
+              ? 'bg-app-bg text-app-text-muted border border-app-border cursor-not-allowed opacity-50'
+              : 'bg-app-success text-white shadow-lg shadow-app-success/20 hover:scale-[1.02] active:scale-95'
+          }`}
+        >
+          {isBulkRunning ? (
+            <><RefreshCw size={14} className="animate-spin" /><span>{t.wait}</span></>
+          ) : (
+            <><Play size={16} fill="currentColor" /><span>{t.startAll}</span></>
+          )}
+        </button>
+        <button 
+          onClick={onStopAll}
+          disabled={!canStopAll || loading || isBulkRunning}
+          className={`px-8 flex items-center justify-center space-x-2 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+            !canStopAll || loading || isBulkRunning
+              ? 'bg-app-bg text-app-text-muted border border-app-border cursor-not-allowed opacity-50'
+              : 'bg-app-danger text-white shadow-lg shadow-app-danger/20 hover:scale-[1.02] active:scale-95'
+          }`}
+        >
+          {isBulkRunning ? (
+            <><RefreshCw size={14} className="animate-spin" /><span>{t.wait}</span></>
+          ) : (
+            <><Square size={16} fill="currentColor" /><span>{t.stopAll}</span></>
+          )}
+        </button>
+      </div>
 
       {hiddenList.length > 0 && (
-        <div className="mt-12">
+        <div className="mt-8 bg-app-surface/50 border border-app-border/50 rounded-2xl p-4">
           <button 
             onClick={() => setShowHidden(!showHidden)}
-            className="flex items-center space-x-2 text-slate-400 hover:text-slate-600 font-bold text-sm transition-colors w-full group"
+            className="flex items-center space-x-2 text-app-text-muted hover:text-app-text transition-all font-black uppercase tracking-widest text-[10px]"
           >
-            <div className="h-px bg-slate-200 flex-1"></div>
-            <span className="px-4 flex items-center bg-slate-50 rounded-full py-1 border border-slate-200 group-hover:border-slate-300">
-              {showHidden ? <ChevronUp size={14} className="mr-1" /> : <ChevronDown size={14} className="mr-1" />}
-              {hiddenList.length} {t.hiddenServices}
-            </span>
-            <div className="h-px bg-slate-200 flex-1"></div>
+            {showHidden ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            <span>{t.hiddenServices} ({hiddenList.length})</span>
           </button>
-
+          
           {showHidden && (
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
               {hiddenList.map(service => (
-                <div key={service.name} className="bg-white rounded-xl p-4 border border-slate-200 flex items-center justify-between shadow-sm hover:shadow-md transition-all">
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-2 h-2 rounded-full ${service.status === 'running' ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                    <span className="font-bold text-slate-700 text-sm">{service.name}</span>
+                <div key={service.name} className="bg-app-surface border border-app-border rounded-xl p-2.5 flex items-center justify-between hover:border-app-primary/50 transition-all">
+                  <div className="flex items-center space-x-2 overflow-hidden">
+                    <div className="text-app-text-muted shrink-0">{getServiceIcon(service.type)}</div>
+                    <span className="text-[10px] font-black text-app-text truncate uppercase">{service.name}</span>
                   </div>
                   <button 
                     onClick={() => onToggleVisibility(service.name)}
-                    className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                    title={t.showService}
+                    className="p-1.5 hover:bg-app-primary/10 hover:text-app-primary text-app-text-muted rounded-lg transition-all"
                   >
-                    <Eye size={16} />
+                    <Eye size={14} />
                   </button>
                 </div>
               ))}
@@ -511,68 +551,70 @@ function Services({ services, hiddenServices, processingServices = [], onToggleV
 
 function Tools({ t }) {
   const tools = [
-    { 
-      id: 'terminal', 
-      name: t.terminal, 
-      desc: t.terminalDesc, 
-      icon: Terminal, 
-      color: 'bg-slate-900', 
-      onClick: () => window.electronAPI.openTerminal() 
+    {
+      id: 'terminal',
+      name: t.terminal,
+      desc: t.terminalDesc || 'Open terminal in Laragon root.',
+      icon: Terminal,
+      color: 'bg-[#1e1e1e] border border-white/10',
+      iconColor: 'text-app-success',
+      onClick: () => window.electronAPI.openTerminal()
     },
-    { 
-      id: 'hosts', 
-      name: t.hostsEditor, 
-      desc: t.hostsDesc, 
-      icon: FileText, 
-      color: 'bg-blue-600', 
-      onClick: () => window.electronAPI.openHosts() 
+    {
+      id: 'hosts',
+      name: t.hostsEditor || 'Hosts Editor',
+      desc: t.hostsDesc || 'Edit system hosts file.',
+      icon: FileText,
+      color: 'bg-app-primary',
+      iconColor: 'text-white',
+      onClick: () => window.electronAPI.openHosts()
     },
-    { 
-      id: 'env', 
-      name: t.envVars, 
-      desc: t.envVarsDesc, 
-      icon: Cpu, 
-      color: 'bg-emerald-600', 
-      onClick: () => window.electronAPI.openEnvVars() 
-    },
+    {
+      id: 'env',
+      name: t.envVars,
+      desc: t.envVarsDesc || 'Configure system environment variables.',
+      icon: Cpu,
+      color: 'bg-app-success',
+      iconColor: 'text-white',
+      onClick: () => window.electronAPI.openEnvVars()
+    }
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">{t.tools}</h2>
-        <p className="text-slate-500 text-sm">{t.toolsDesc}</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {tools.map(tool => (
           <button
             key={tool.id}
             onClick={tool.onClick}
-            className="group relative bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-xl hover:border-blue-200 transition-all text-left overflow-hidden"
+            className="group relative bg-app-surface rounded-2xl p-5 border border-app-border shadow-sm hover:shadow-xl hover:border-app-primary/50 transition-all duration-500 text-left overflow-hidden"
           >
-            <div className={`w-12 h-12 ${tool.color} rounded-xl flex items-center justify-center text-white mb-4 shadow-lg group-hover:scale-110 transition-transform`}>
-              <tool.icon size={24} />
+            <div className={`w-10 h-10 ${tool.color} rounded-xl flex items-center justify-center ${tool.iconColor} mb-4 shadow-lg group-hover:scale-110 group-hover:rotate-6 transition-all duration-500`}>
+              <tool.icon size={20} />
             </div>
-            <h3 className="text-lg font-black text-slate-800 mb-1">{tool.name}</h3>
-            <p className="text-sm text-slate-500 leading-relaxed">{tool.desc}</p>
+            <h3 className="text-sm font-black text-app-text mb-1 uppercase tracking-tight">{tool.name}</h3>
+            <p className="text-[10px] text-app-text-muted leading-relaxed font-bold uppercase tracking-tight opacity-70">{tool.desc}</p>
             
-            <div className="absolute top-4 right-4 text-slate-300 group-hover:text-blue-500 transition-colors">
-              <ChevronRight size={20} />
+            <div className="absolute top-4 right-4 text-app-text-muted group-hover:text-app-primary transition-colors">
+              <ChevronRight size={18} />
             </div>
+            <div className="absolute -bottom-8 -right-8 w-24 h-24 bg-app-primary/5 rounded-full group-hover:scale-150 transition-transform duration-700"></div>
           </button>
         ))}
       </div>
 
-      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-8 text-center mt-8">
-        <h3 className="text-blue-800 font-bold mb-2">{t.needMore}</h3>
-        <p className="text-blue-600/70 text-sm mb-4">{t.workingMore}</p>
-        <button 
-          onClick={() => window.electronAPI.openInBrowser('https://github.com/leandromaro/MyLaragon/issues')}
-          className="text-blue-700 font-bold text-sm hover:underline"
-        >
-          {t.suggestFunc} →
-        </button>
+      <div className="bg-app-primary/5 border border-app-primary/10 rounded-2xl p-6 text-center mt-6 relative overflow-hidden">
+        <div className="relative z-10">
+          <h3 className="text-app-primary text-sm font-black mb-1 uppercase tracking-tight">{t.needMore}</h3>
+          <p className="text-[10px] font-bold text-app-text-muted mb-4 uppercase tracking-widest">{t.workingMore}</p>
+          <button 
+            onClick={() => window.electronAPI.openInBrowser('https://github.com/msoler75/MyLaragon/issues')}
+            className="bg-app-primary text-app-primary-text px-6 py-2 rounded-xl font-black text-[10px] hover:scale-110 transform transition-all uppercase tracking-[0.2em] shadow-lg shadow-app-primary/20"
+          >
+            {t.suggestFunc} 
+          </button>
+        </div>
+        <Zap className="absolute -left-8 -top-8 text-app-primary/5 w-40 h-40 -rotate-12" />
       </div>
     </div>
   )
@@ -585,12 +627,13 @@ function Settings({ config, setConfig, t, availableLanguages }) {
     setLocalConfig(config);
   }, [config]);
 
+  const hasChanges = JSON.stringify(localConfig) !== JSON.stringify(config);
+
   const handleSave = async () => {
     if (window.electronAPI) {
       await window.electronAPI.setConfig(localConfig);
       const updatedConfig = await window.electronAPI.getConfig();
       setConfig(updatedConfig);
-      alert(t.saveSuccess);
     }
   };
 
@@ -601,6 +644,13 @@ function Settings({ config, setConfig, t, availableLanguages }) {
     }
   };
 
+  const themesList = [
+    { id: 'system', label: t.themeSystem },
+    { id: 'light', label: t.themeLight },
+    { id: 'dark', label: t.themeDark },
+    { id: 'sepia', label: t.themeSepia }
+  ];
+
   const editors = [
     { id: 'notepad', label: t.editorDefault },
     { id: 'code', label: t.editorVSCode },
@@ -609,73 +659,62 @@ function Settings({ config, setConfig, t, availableLanguages }) {
   ];
 
   return (
-    <div className="space-y-6 pb-20">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">{t.settings}</h2>
-        <p className="text-slate-500 text-sm">{t.globalSettings}</p>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 divide-y divide-slate-100">
+    <div className="space-y-6 pb-12 animate-in fade-in slide-in-from-bottom-6 duration-700">
+      <div className="bg-app-surface rounded-2xl shadow-sm border border-app-border divide-y divide-app-border overflow-hidden">
         <div className="p-6">
-          <div className="flex items-center justify-between">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">{t.language}</h3>
-              <p className="text-xs text-slate-400">Selecciona el idioma de la interfaz (Auto-detectado)</p>
+              <h3 className="text-[10px] font-black text-app-text-muted uppercase tracking-widest mb-3 px-1">{t.language}</h3>
+              <div className="relative">
+                <select 
+                  value={localConfig.language}
+                  onChange={(e) => setLocalConfig({...localConfig, language: e.target.value})}
+                  className="w-full bg-app-bg border border-app-border rounded-xl px-4 py-3 text-xs font-bold text-app-text outline-none focus:ring-2 focus:ring-app-primary/20 transition-all appearance-none cursor-pointer"
+                >
+                  {availableLanguages.map(lang => (
+                    <option key={lang.id} value={lang.id}>{lang.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-app-text-muted pointer-events-none" size={16} />
+              </div>
             </div>
-            <div className="relative group w-64">
-              <select 
-                value={localConfig.language}
-                onChange={(e) => setLocalConfig({...localConfig, language: e.target.value})}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
-              >
-                {availableLanguages.map(lang => (
-                  <option key={lang.id} value={lang.id}>
-                    {lang.label}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                <ChevronDown size={18} />
+
+            <div>
+              <h3 className="text-[10px] font-black text-app-text-muted uppercase tracking-widest mb-3 px-1">{t.theme}</h3>
+              <div className="relative">
+                <select 
+                  value={localConfig.theme}
+                  onChange={(e) => setLocalConfig({...localConfig, theme: e.target.value})}
+                  className="w-full bg-app-bg border border-app-border rounded-xl px-4 py-3 text-xs font-bold text-app-text outline-none focus:ring-2 focus:ring-app-primary/20 transition-all appearance-none cursor-pointer"
+                >
+                  {themesList.map(theme => (
+                    <option key={theme.id} value={theme.id}>{theme.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-app-text-muted pointer-events-none" size={16} />
               </div>
             </div>
           </div>
         </div>
 
-        <div className="p-6">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">{t.systemPaths}</h3>
+        <div className="p-6 bg-app-bg/10">
+          <h3 className="text-[10px] font-black text-app-text-muted uppercase tracking-widest mb-4 px-1">{t.systemPaths}</h3>
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t.laragonDir}</label>
+            <div className="group">
+              <label className="block text-[10px] font-black text-app-text-muted uppercase tracking-widest mb-1.5 px-1">{t.laragonDir}</label>
               <div className="flex items-center space-x-2">
-                <input 
-                  type="text" 
-                  value={localConfig.laragonPath || ''} 
-                  onChange={(e) => setLocalConfig({...localConfig, laragonPath: e.target.value})}
-                  className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm text-slate-600 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <button 
-                  onClick={() => handleSelectDir('laragonPath')}
-                  className="p-2 bg-white border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 transition-all"
-                >
+                <input type="text" value={localConfig.laragonPath || ''} readOnly className="flex-1 bg-app-bg border border-app-border rounded-xl px-4 py-2.5 text-xs font-bold text-app-text-muted/70 outline-none" />
+                <button onClick={() => handleSelectDir('laragonPath')} className="p-2.5 bg-app-surface border border-app-border rounded-xl text-app-text hover:bg-app-primary hover:text-white transition-all">
                   <Folder size={18} />
                 </button>
               </div>
             </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{t.projectsDir}</label>
+            <div className="group">
+              <label className="block text-[10px] font-black text-app-text-muted uppercase tracking-widest mb-1.5 px-1">{t.projectsDir}</label>
               <div className="flex items-center space-x-2">
-                <input 
-                  type="text" 
-                  value={localConfig.projectsPath || ''} 
-                  onChange={(e) => setLocalConfig({...localConfig, projectsPath: e.target.value})}
-                  className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm text-slate-600 font-mono focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <button 
-                  onClick={() => handleSelectDir('projectsPath')}
-                  className="p-2 bg-white border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 transition-all"
-                >
-                   <Folder size={18} />
+                <input type="text" value={localConfig.projectsPath || ''} readOnly className="flex-1 bg-app-bg border border-app-border rounded-xl px-4 py-2.5 text-xs font-bold text-app-text-muted/70 outline-none" />
+                <button onClick={() => handleSelectDir('projectsPath')} className="p-2.5 bg-app-surface border border-app-border rounded-xl text-app-text hover:bg-app-primary hover:text-white transition-all">
+                  <Folder size={18} />
                 </button>
               </div>
             </div>
@@ -683,69 +722,67 @@ function Settings({ config, setConfig, t, availableLanguages }) {
         </div>
 
         <div className="p-6">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">{t.fileEditor}</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <h3 className="text-[10px] font-black text-app-text-muted uppercase tracking-widest mb-4 px-1">{t.fileEditor}</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {editors.map(editor => (
               <button
                 key={editor.id}
                 onClick={() => setLocalConfig({...localConfig, editor: editor.id})}
-                className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
+                className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all duration-300 ${
                   localConfig.editor === editor.id 
-                    ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-sm' 
-                    : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                    ? 'border-app-primary bg-app-primary/5 text-app-primary scale-105 shadow-md shadow-app-primary/5' 
+                    : 'border-app-border hover:border-app-text-muted text-app-text-muted bg-app-bg/30'
                 }`}
               >
-                <div className="flex items-center space-x-3">
-                  <Code size={18} className={localConfig.editor === editor.id ? 'text-blue-600' : 'text-slate-400'} />
-                  <span className="text-sm font-bold">{editor.label}</span>
-                </div>
-                {localConfig.editor === editor.id && (
-                  <div className="w-2 h-2 rounded-full bg-blue-600"></div>
-                )}
+                <Code size={20} className="mb-2" />
+                <span className="text-[10px] font-black uppercase tracking-tighter">{editor.label}</span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="p-6">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">{t.preferences}</h3>
-          <div className="flex items-center justify-between bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+        <div className="p-6 bg-app-bg/10">
+          <div className="flex items-center justify-between bg-app-surface p-4 rounded-2xl border border-app-border shadow-sm">
             <div>
-              <p className="text-slate-800 font-bold">{t.autoStart}</p>
-              <p className="text-xs text-slate-400">{t.autoStartDesc}</p>
+              <p className="text-sm font-black text-app-text uppercase italic tracking-tight">{t.autoStart}</p>
+              <p className="text-[10px] font-bold text-app-text-muted">{t.autoStartDesc}</p>
             </div>
             <button 
               onClick={() => setLocalConfig({...localConfig, autoStart: !localConfig.autoStart})}
-              className={`w-14 h-7 rounded-full relative transition-all duration-300 focus:outline-none shadow-inner ${
-                localConfig.autoStart ? 'bg-blue-600 shadow-blue-900/20' : 'bg-slate-200'
+              className={`w-12 h-6 rounded-full transition-all duration-500 relative border-2 ${
+                localConfig.autoStart ? 'bg-app-primary/10 border-app-primary/40' : 'bg-app-bg border-app-border'
               }`}
             >
-              <div className={`absolute top-1 left-1 bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-300 flex items-center justify-center ${
-                localConfig.autoStart ? 'translate-x-7' : 'translate-x-0'
-              }`}>
-                <div className={`w-1 h-1 rounded-full ${localConfig.autoStart ? 'bg-blue-600' : 'bg-slate-300'}`}></div>
-              </div>
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-500 shadow-sm ${
+                localConfig.autoStart ? 'left-6.5 bg-app-primary' : 'left-0.5 bg-app-text-muted/50'
+              }`}></div>
             </button>
           </div>
         </div>
-      </div>
 
-      <div className="flex justify-end space-x-3">
-        <button 
-          onClick={() => setLocalConfig(config)}
-          className="px-6 py-2 border border-slate-200 rounded-xl text-slate-600 font-bold hover:bg-slate-50 transition-all"
-        >
-          {t.discard}
-        </button>
-        <button 
-          onClick={handleSave}
-          className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
-        >
-          {t.saveChanges}
-        </button>
+        <div className="p-6 flex justify-between items-center bg-app-surface">
+          <button 
+            onClick={() => setLocalConfig(config)} 
+            disabled={!hasChanges}
+            className={`text-[10px] font-black uppercase tracking-widest transition-colors ${!hasChanges ? 'text-app-text-muted/30 cursor-not-allowed' : 'text-app-text-muted hover:text-app-text'}`}
+          >
+            {t.discard}
+          </button>
+          <button 
+            onClick={handleSave} 
+            disabled={!hasChanges}
+            className={`px-8 py-3 rounded-xl font-black text-xs transition-all uppercase tracking-widest ${
+              !hasChanges 
+                ? 'bg-app-bg text-app-text-muted/50 border border-app-border cursor-not-allowed opacity-60' 
+                : 'bg-app-primary text-app-primary-text shadow-lg shadow-app-primary/20 hover:scale-105 active:scale-95'
+            }`}
+          >
+            {t.saveChanges}
+          </button>
+        </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

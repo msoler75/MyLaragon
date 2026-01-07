@@ -40,7 +40,8 @@ let userConfig = {
   projectsPath: 'C:\\laragon\\www',
   editor: 'notepad', // notepad, code, notepad++, default
   autoStart: false,
-  language: 'es' // es, en, de
+  language: 'es', // es, en, de
+  theme: 'system' // system, light, dark, sepia
 };
 
 // Cargar configuración guardada
@@ -416,21 +417,29 @@ async function getServiceStatus(service) {
         return { status: 'unknown', port: null, details: 'Unsupported service type' };
     }
     
-    processRunning = await checkProcess(processName);
-    portInUse = await checkPort(port);
+    const processInfo = await checkProcess(processName);
+    const portInfo = await checkPort(port);
+    
+    processRunning = processInfo.running;
+    portInUse = portInfo.inUse;
     
     let status;
     let details = '';
     
-    if (processRunning && portInUse) {
-      status = 'running';
-      details = `Proceso ${processName} corriendo y puerto ${port} en uso.`;
-    } else if (processRunning && !portInUse) {
+    if (portInUse) {
+      // Si el puerto está en uso (LISTENING), verificamos si el PID pertenece a nuestro servicio
+      const isOurProcess = processInfo.pids.includes(portInfo.pid);
+      if (isOurProcess) {
+        status = 'running';
+        details = `Proceso ${processName} (PIDs: ${processInfo.pids.join(',')}) escuchando en puerto ${port}.`;
+      } else {
+        status = 'port_occupied_by_other';
+        details = `El puerto ${port} está ocupado por otro proceso (PID: ${portInfo.pid}).`;
+      }
+    } else if (processRunning) {
+      // El proceso existe pero no hay nada en LISTENING en ese puerto
       status = 'running_but_port_not_listening';
-      details = `Proceso ${processName} corriendo pero puerto ${port} no está escuchando.`;
-    } else if (!processRunning && portInUse) {
-      status = 'port_occupied_by_other';
-      details = `Puerto ${port} ocupado por otro proceso.`;
+      details = `Proceso ${processName} activo pero puerto ${port} no está escuchando.`;
     } else {
       status = 'stopped';
       details = `Servicio detenido.`;
@@ -445,16 +454,64 @@ async function getServiceStatus(service) {
 
 async function checkProcess(processName) {
   return new Promise((resolve) => {
-    exec(`tasklist /FI "IMAGENAME eq ${processName}" /NH`, (error, stdout) => {
-      resolve(stdout.includes(processName));
+    // Usamos /FO CSV para obtener datos estructurados y poder extraer PIDs
+    exec(`tasklist /FI "IMAGENAME eq ${processName}" /NH /FO CSV`, (error, stdout) => {
+      if (error || !stdout || stdout.includes("No hay tareas")) {
+        resolve({ running: false, pids: [] });
+        return;
+      }
+      
+      const pids = [];
+      const lines = stdout.split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        // El formato CSV es "Nombre de imagen","PID","Nombre de sesión","Núm de sesión","Uso de memoria"
+        const parts = line.split("\",\"");
+        if (parts.length > 1) {
+          const pid = parts[1].replace(/"/g, "");
+          if (!isNaN(parseInt(pid))) {
+            pids.push(pid);
+          }
+        }
+      }
+      resolve({ running: pids.length > 0, pids });
     });
   });
 }
 
 async function checkPort(port) {
   return new Promise((resolve) => {
-    exec(`netstat -ano | findstr LISTENING | findstr :${port}`, (error, stdout) => {
-      resolve(stdout.trim() !== '');
+    // netstat -ano devuelve todas las conexiones con PID
+    exec(`netstat -ano`, (error, stdout) => {
+      if (error) {
+        resolve({ inUse: false, pid: null });
+        return;
+      }
+
+      const lines = stdout.split("\n");
+      const portStr = `:${port}`;
+      
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 5) continue;
+
+        const localAddr = parts[1]; // e.g. 0.0.0.0:80 or [::]:80
+        const state = parts[3];
+        const pid = parts[4];
+
+        // Validar que el puerto coincida exactamente al final de la dirección local
+        // Esto evita que :80 coincida con :8025
+        const isExactPort = localAddr.endsWith(portStr);
+        
+        // Solo consideramos conflicto real si está en estado LISTENING
+        // Estados como CLOSE_WAIT o FIN_WAIT no bloquean la escucha de nuevos procesos usualmente
+        if (isExactPort && state === "LISTENING") {
+          resolve({ inUse: true, pid: pid, state: state });
+          return;
+        }
+      }
+      
+      resolve({ inUse: false, pid: null });
     });
   });
 }
@@ -642,6 +699,7 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    backgroundColor: '#0f172a',
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
