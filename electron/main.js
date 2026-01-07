@@ -743,8 +743,29 @@ async function startService(service) {
       break;
     case 'mysql':
     case 'mariadb':
-      const myIni = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'my.ini');
-      const mysqlProcess = spawn(fullExePath, ['--defaults-file=' + myIni, '--standalone'], { cwd: binPath, detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+      const baseDir = path.join(userConfig.laragonPath, 'bin', service.type, service.version);
+      const dataDir = path.join(userConfig.laragonPath, 'data', service.type === 'mysql' ? 'mysql' : 'mariadb');
+      const myIni = path.join(baseDir, 'my.ini');
+      
+      // Asegurar que el PATH incluya el directorio bin para cargar DLLs
+      const mysqlEnv = { ...process.env };
+      mysqlEnv.PATH = `${binPath};${mysqlEnv.PATH}`;
+
+      const mysqlArgs = [
+        `--defaults-file=${myIni}`,
+        `--basedir=${baseDir}`,
+        `--datadir=${dataDir}`,
+        '--standalone'
+      ];
+
+      log(`Iniciando MySQL con basedir: ${baseDir}`);
+      const mysqlProcess = spawn(fullExePath, mysqlArgs, { 
+        cwd: binPath, 
+        detached: false, 
+        env: mysqlEnv,
+        stdio: ['ignore', 'pipe', 'pipe'] 
+      });
+      
       mysqlProcess.stderr.on('data', (data) => {
         log(`MySQL stderr: ${data.toString()}`, 'ERROR');
       });
@@ -772,33 +793,96 @@ async function startService(service) {
   }
 }
 
+async function waitForProcessToStop(processName, timeoutMs = 8000) {
+  const start = Date.now();
+  const lowerName = processName.toLowerCase();
+  while (Date.now() - start < timeoutMs) {
+    const processes = await getAllProcesses();
+    if (!processes[lowerName]) {
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
 async function stopService(service) {
-  switch (service.type) {
-    case 'apache':
-      await execAsync('taskkill /IM httpd.exe');
-      break;
-    case 'nginx':
-      await execAsync('taskkill /IM nginx.exe');
-      break;
-    case 'mysql':
-    case 'mariadb':
-      await execAsync('taskkill /IM mysqld.exe');
-      break;
-    case 'postgresql':
-      // pg_ctl stop
-      break;
-    case 'redis':
-      await execAsync('taskkill /IM redis-server.exe');
-      break;
-    case 'memcached':
-      await execAsync('taskkill /IM memcached.exe');
-      break;
-    case 'mailpit':
-      await execAsync('taskkill /IM mailpit.exe');
-      break;
-    case 'mongodb':
-      await execAsync('taskkill /IM mongod.exe');
-      break;
+  const executableMapping = {
+    'apache': 'httpd.exe',
+    'nginx': 'nginx.exe',
+    'mysql': 'mysqld.exe',
+    'mariadb': 'mysqld.exe',
+    'redis': 'redis-server.exe',
+    'memcached': 'memcached.exe',
+    'mailpit': 'mailpit.exe',
+    'mongodb': 'mongod.exe',
+    'postgresql': 'postgres.exe'
+  };
+
+  const exeName = executableMapping[service.type];
+  if (!exeName) return;
+
+  log(`Intentando detener ${service.name} (${exeName}) de forma elegante...`);
+
+  let binPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version);
+  if (fs.existsSync(path.join(binPath, 'bin'))) {
+    binPath = path.join(binPath, 'bin');
+  }
+  const fullExePath = path.join(binPath, exeName);
+
+  try {
+    switch (service.type) {
+      case 'apache':
+        const confPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'conf', 'httpd.conf');
+        // Comando nativo de Apache para detención
+        await execAsync(`"${fullExePath}" -k stop -f "${confPath}"`).catch(() => {});
+        // Fallback: señal de cierre normal
+        await execAsync(`taskkill /IM ${exeName}`).catch(() => {});
+        break;
+      case 'nginx':
+        await execAsync(`"${fullExePath}" -s stop`).catch(() => {});
+        await execAsync(`taskkill /IM ${exeName}`).catch(() => {});
+        break;
+      case 'mysql':
+      case 'mariadb':
+        const mysqlAdmin = path.join(binPath, 'mysqladmin.exe');
+        if (fs.existsSync(mysqlAdmin)) {
+          // Laragon por defecto no tiene contraseña root
+          await execAsync(`"${mysqlAdmin}" -u root shutdown`).catch(() => {});
+        }
+        await execAsync(`taskkill /IM ${exeName}`).catch(() => {});
+        break;
+      case 'redis':
+        const redisCli = path.join(binPath, 'redis-cli.exe');
+        if (fs.existsSync(redisCli)) {
+          await execAsync(`"${redisCli}" shutdown`).catch(() => {});
+        }
+        await execAsync(`taskkill /IM ${exeName}`).catch(() => {});
+        break;
+      case 'postgresql':
+        const pgCtl = path.join(binPath, 'pg_ctl.exe');
+        const pgData = path.join(userConfig.laragonPath, 'data', 'postgresql');
+        if (fs.existsSync(pgCtl)) {
+          await execAsync(`"${pgCtl}" stop -D "${pgData}"`).catch(() => {});
+        }
+        await execAsync(`taskkill /IM postgres.exe`).catch(() => {});
+        break;
+      default:
+        await execAsync(`taskkill /IM ${exeName}`).catch(() => {});
+        break;
+    }
+  } catch (e) {
+    log(`Aviso durante detención de ${service.name}: ${e.message}`, 'DEBUG');
+  }
+
+  // Esperar a que el proceso desaparezca
+  const stopped = await waitForProcessToStop(exeName);
+  
+  if (!stopped) {
+    log(`${service.name} (${exeName}) no se detuvo a tiempo. Forzando cierre...`, 'WARNING');
+    await execAsync(`taskkill /F /IM ${exeName}`).catch(() => {});
+  } else {
+    log(`${service.name} se detuvo correctamente.`);
   }
 }
 
