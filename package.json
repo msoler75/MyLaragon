@@ -1,7 +1,8 @@
 {
   "name": "mylaragon",
   "private": true,
-  "version": "0.0.0",  "description": "A modern and lightweight companion app for Laragon",
+  "version": "0.99.0",
+  "description": "A modern and lightweight companion app for Laragon",
   "author": "msoler75",  "main": "electron/main.js",
   "type": "module",
   "scripts": {
