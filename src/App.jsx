@@ -59,6 +59,8 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [processingServices, setProcessingServices] = useState([])
   const [isBulkRunning, setIsBulkRunning] = useState(false)
+  const [logs, setLogs] = useState([])
+  const [unreadErrors, setUnreadErrors] = useState(0)
   const [hiddenServices, setHiddenServices] = useState(() => {
     const saved = localStorage.getItem('hiddenServices')
     return saved ? JSON.parse(saved) : []
@@ -71,19 +73,24 @@ function App() {
     // Si viene de un evento de React o similar, isSilent no será estrictamente true
     const silent = isSilent === true;
     
+    console.log('[APP] loadServices called, electronAPI:', !!window.electronAPI, 'isSilent:', isSilent);
     if (window.electronAPI && !refreshingRef.current) {
       refreshingRef.current = true;
       if (!silent) setLoading(true)
       try {
         const servicesData = await window.electronAPI.getServices(hiddenServices)
+        console.log('[APP] Servicios recibidos:', servicesData);
         // Solo actualizamos si no hay acciones en curso que puedan ser invalidadas
         setServices(servicesData)
+        console.log('[APP] State actualizado con', servicesData?.length || 0, 'servicios');
       } catch (error) {
-        console.error('Error loading services:', error)
+        console.error('[APP] Error loading services:', error)
       } finally {
         if (!silent) setLoading(false)
         refreshingRef.current = false;
       }
+    } else {
+      console.log('[APP] electronAPI no disponible:', !window.electronAPI, 'refrescando:', refreshingRef.current);
     }
   }, [hiddenServices]);
 
@@ -125,6 +132,58 @@ function App() {
   }, [])
 
   useEffect(() => {
+    let isMounted = true;
+    
+    if (window.electronAPI && window.electronAPI.onLog) {
+      // Función para formatear la fecha consistentemente
+      const formatTime = (ts) => {
+        try {
+          return new Date(ts).toLocaleTimeString();
+        } catch (e) {
+          return ts;
+        }
+      };
+
+      // Cargar logs históricos primero
+      window.electronAPI.getLogs().then(historicalLogs => {
+        if (!isMounted) return;
+        setLogs(prev => {
+          // Si ya hay logs (en vivo), los añadimos después de los históricos sin duplicar
+          const history = historicalLogs.map(l => ({...l, timestamp: formatTime(l.timestamp)}));
+          // Evitamos duplicar logs que ya podrían haber llegado "en vivo" comparando mensaje y timestamp aproximado
+          return [...history, ...prev].slice(-300);
+        });
+      });
+
+      // Suscribirse a logs en vivo
+      window.electronAPI.onLog((logData) => {
+        if (!isMounted) return;
+        
+        if (logData.level === 'ERROR' && activeTab !== 'logs') {
+          setUnreadErrors(prev => prev + 1);
+        }
+
+        const formattedLog = {
+          ...logData,
+          timestamp: formatTime(logData.timestamp)
+        };
+        setLogs(prev => [...prev, formattedLog].slice(-300));
+      });
+    }
+
+    return () => {
+      isMounted = false;
+      // Idealmente aquí removeríamos el listener, pero onLog en preload.js no devuelve el remover aún
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'logs') {
+      setUnreadErrors(0);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
     localStorage.setItem('hiddenServices', JSON.stringify(hiddenServices))
     loadServices()
   }, [hiddenServices])
@@ -147,7 +206,21 @@ function App() {
         const type = service?.type?.toLowerCase() || '';
         const isHeavy = ['mysql', 'mariadb', 'mongodb', 'postgresql'].includes(type);
         
-        await window.electronAPI.startService(serviceName);
+        // Verificar si el servicio ya está corriendo
+        if (service?.status === 'running') {
+          console.log(`${serviceName} ya está ejecutándose`);
+          setProcessingServices(prev => prev.filter(s => s !== serviceName));
+          return;
+        }
+        
+        const result = await window.electronAPI.startService(serviceName);
+        
+        if (!result.success) {
+          console.error('Error starting service:', result.message);
+          alert(`Error al iniciar ${serviceName}: ${result.message}`);
+          setProcessingServices(prev => prev.filter(s => s !== serviceName));
+          return;
+        }
         
         // Espera dinámica: DBs necesitan más tiempo para abrir puertos
         const delay = isHeavy ? 4500 : (['apache', 'nginx'].includes(type) ? 2500 : 1500);
@@ -156,6 +229,7 @@ function App() {
         await loadServices();
       } catch (error) {
         console.error('Error starting service:', error);
+        alert(`Error al iniciar ${serviceName}: ${error.message || error}`);
       } finally {
         setProcessingServices(prev => prev.filter(s => s !== serviceName))
       }
@@ -197,6 +271,7 @@ function App() {
   const menuItems = [
     { id: 'dashboard', label: t.dashboard, icon: Zap },
     { id: 'tools', label: t.tools, icon: Wrench },
+    { id: 'logs', label: t.logs, icon: FileText, badge: unreadErrors },
     { id: 'settings', label: t.settings, icon: SettingsIcon },
   ]
 
@@ -218,14 +293,19 @@ function App() {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center w-full space-x-3 px-3 py-2.5 rounded-xl transition-all duration-300 group ${
+                className={`flex items-center w-full space-x-3 px-3 py-2.5 rounded-xl transition-all duration-300 group relative ${
                   activeTab === item.id 
                     ? 'bg-app-primary text-app-primary-text shadow-lg shadow-app-primary/20' 
                     : 'text-app-text-muted hover:bg-app-bg hover:text-app-text'
                 }`}
               >
                 <Icon size={18} />
-                <span className="font-bold uppercase tracking-wider text-xs">{item.label}</span>
+                <span className="font-bold uppercase tracking-wider text-xs flex-1 text-left">{item.label}</span>
+                {item.badge > 0 && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-app-danger px-1 text-[9px] font-black text-white shadow-sm ring-2 ring-app-surface animate-in zoom-in duration-300">
+                    {item.badge > 99 ? '99+' : item.badge}
+                  </span>
+                )}
               </button>
             )
           })}
@@ -299,6 +379,7 @@ function App() {
               />
             )}
             {activeTab === 'tools' && <Tools t={t} />}
+            {activeTab === 'logs' && <Logs logs={logs} t={t} setLogs={setLogs} />}
             {activeTab === 'settings' && (
               <Settings 
                 config={config} 
@@ -479,16 +560,32 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
                           <div className="h-px bg-app-border my-1"></div>
                         )}
 
-                        {service.configs?.map((conf, idx) => (
-                          <button 
-                            key={idx}
-                            onClick={() => { window.electronAPI.openConfigFile(conf); setMenuOpen(null); }} 
-                            className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
-                          >
-                            {conf.type === 'folder' ? <Folder size={12} /> : <Code size={12} />}
-                            <span className="truncate">{t[conf.label] || conf.label}</span>
-                          </button>
-                        ))}
+                        {service.name === 'MySQL' && (
+                          <>
+                            <button 
+                              onClick={() => { window.electronAPI.openStartupLog(); setMenuOpen(null); }} 
+                              className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
+                            >
+                              <FileText size={12} />
+                              <span>{t.diagnosticLog || '📋 Diagnóstico'}</span>
+                            </button>
+                            <div className="h-px bg-app-border my-1"></div>
+                          </>
+                        )}
+
+                        {service.configs?.map((conf, idx) => {
+                          const isLog = conf.label.toLowerCase().endsWith('.log');
+                          return (
+                            <button 
+                              key={idx}
+                              onClick={() => { window.electronAPI.openConfigFile(conf); setMenuOpen(null); }} 
+                              className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
+                            >
+                              {conf.type === 'folder' ? <Folder size={12} /> : (isLog ? <FileText size={12} /> : <Code size={12} />)}
+                              <span className="truncate">{t[conf.label] || conf.label}</span>
+                            </button>
+                          );
+                        })}
                         <div className="h-px bg-app-border my-1"></div>
                         <button 
                           onClick={() => { onToggleVisibility(service.name); setMenuOpen(null); }} 
@@ -714,6 +811,120 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
       )}
     </div>
   )
+}
+
+function Logs({ logs, t, setLogs }) {
+  const scrollRef = useRef(null);
+  const [activeFilters, setActiveFilters] = useState(['INFO', 'WARNING', 'ERROR']);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [logs, activeFilters]);
+
+  const handleClear = async () => {
+    if (window.electronAPI) {
+      const success = await window.electronAPI.clearLogs();
+      if (success) setLogs([]);
+    }
+  };
+
+  const toggleFilter = (level) => {
+    setActiveFilters(prev => 
+      prev.includes(level) 
+        ? prev.filter(l => l !== level) 
+        : [...prev, level]
+    );
+  };
+
+  const filteredLogs = logs.filter(log => activeFilters.includes(log.level));
+
+  const filterStats = {
+    INFO: logs.filter(l => l.level === 'INFO').length,
+    WARNING: logs.filter(l => l.level === 'WARNING').length,
+    ERROR: logs.filter(l => l.level === 'ERROR').length
+  };
+
+  return (
+    <div className="bg-app-surface border border-app-border rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[calc(100vh-12rem)]">
+      <div className="p-4 border-b border-app-border flex flex-wrap items-center justify-between gap-4 shrink-0 bg-app-surface/50 backdrop-blur-md">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-1.5 bg-app-bg/50 p-1 rounded-xl border border-app-border mr-2">
+            {[
+              { id: 'INFO', label: 'Info', color: 'text-app-primary', bg: 'bg-app-primary/10' },
+              { id: 'WARNING', label: 'Warn', color: 'text-app-warning', bg: 'bg-app-warning/10' },
+              { id: 'ERROR', label: 'Err', color: 'text-app-danger', bg: 'bg-app-danger/10' }
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => toggleFilter(f.id)}
+                className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-wider ${
+                  activeFilters.includes(f.id)
+                    ? `${f.bg} ${f.color} shadow-sm ring-1 ring-inset ring-current/20`
+                    : 'text-app-text-muted hover:bg-app-bg hover:text-app-text'
+                }`}
+              >
+                <span>{f.label}</span>
+                <span className={`px-1.5 py-0.5 rounded-md ${activeFilters.includes(f.id) ? 'bg-white/20' : 'bg-app-bg'} opacity-60`}>
+                  {filterStats[f.id]}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <button 
+            onClick={handleClear}
+            className="flex items-center space-x-2 text-[10px] font-black uppercase tracking-widest text-app-text-muted hover:text-app-danger transition-colors px-4 py-2 rounded-xl hover:bg-app-danger/10 border border-app-border"
+          >
+            Limpiar
+          </button>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <span className="flex items-center space-x-2 text-[10px] font-black uppercase tracking-widest bg-app-bg/50 px-4 py-2 rounded-xl border border-app-border">
+              <span className="w-1.5 h-1.5 rounded-full bg-app-success animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+              <span className="text-app-text-muted">Live Active</span>
+          </span>
+        </div>
+      </div>
+      
+      <div 
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto p-6 font-mono text-[11px] space-y-2 bg-black/5 custom-scrollbar"
+      >
+        {filteredLogs.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-app-text-muted opacity-50 space-y-4">
+            <SquareTerminal size={48} strokeWidth={1} />
+            <div className="text-center">
+              <p className="font-black uppercase tracking-widest text-[10px]">Sin mensajes que mostrar</p>
+              <p className="text-[9px] font-bold mt-1 uppercase tracking-tighter opacity-70">Ajusta los filtros o espera nueva actividad</p>
+            </div>
+          </div>
+        ) : (
+          filteredLogs.map((log, i) => (
+            <div key={i} className={`flex space-x-3 items-start animate-in fade-in slide-in-from-left-1 duration-300 leading-relaxed group`}>
+              <span className="text-app-text-muted shrink-0 select-none opacity-50 w-20 group-hover:opacity-100 transition-opacity">[{log.timestamp}]</span>
+              <span className={`shrink-0 font-black uppercase text-[9px] px-1.5 py-0.5 rounded min-w-[65px] text-center shadow-sm ${
+                log.level === 'ERROR' ? 'bg-app-danger text-white' : 
+                log.level === 'WARNING' ? 'bg-app-warning text-white' : 
+                'bg-app-primary/10 text-app-primary ring-1 ring-inset ring-app-primary/20'
+              }`}>
+                {log.level}
+              </span>
+              <span className={`break-all ${
+                log.level === 'ERROR' ? 'text-app-danger font-bold' : 
+                log.level === 'WARNING' ? 'text-app-warning' : 
+                'text-app-text/90'
+              }`}>
+                {log.message}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
 }
 
 function Tools({ t }) {

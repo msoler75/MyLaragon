@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "com.msoler75.mylaragon",
+  "name": "MyLaragon",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 0,
+  "documentRoot": "./www/",
+  "url": "http://localhost:5173/",
+  "enableServer": false,
+  "enableNativeAPI": true,
+  "tokenSecurity": "one-time",
+  "logging": {
+    "enabled": false,
+    "writeToLogFile": false
+  },
+  "nativeAllowList": [
+    "os.*",
+    "filesystem.*",
+    "window.*",
+    "app.*"
+  ],
+  "globalVariables": {},
+  "modes": {
+    "window": {
+      "title": "MyLaragon",
+      "width": 1200,
+      "height": 800,
+      "minWidth": 800,
+      "minHeight": 600,
+      "center": true,
+      "fullScreen": false,
+      "alwaysOnTop": false,
+      "enableInspector": true,
+      "borderless": false,
+      "maximize": false,
+      "hidden": false,
+      "resizable": true,
+      "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "MyLaragon",
+    "resourcesPath": "./www/",
+    "extensionsPath": "./extensions/",
+    "clientLibrary": "./www/neutralino.js",
+    "binaryVersion": "6.4.0",
+    "clientVersion": "6.4.0"
+  }
+}

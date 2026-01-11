@@ -14,6 +14,11 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Cargar Neutralino primero si está disponible (en Neutralino runtime) -->
+    <script src="/neutralino.js"></script>
+    <!-- El shim expone window.electronAPI -->
+    <script src="/neutralino-shim.js"></script>
+    <!-- Script principal de React -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

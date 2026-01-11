@@ -38,8 +38,41 @@ Si quieres contribuir o compilar el proyecto tú mismo:
 ### Pasos
 1. Clona el repositorio.
 2. Instala las dependencias: `npm install`
-3. Ejecuta en modo desarrollo: `npm run dev`
+3. Ejecuta en modo desarrollo (Vite): `npm run dev`
+
+Opciones de ejecución en desarrollo:
+
+- Ejecutar sólo la UI (Vite):
+
+```bash
+npm run dev
+```
+
+- Ejecutar la UI y Neutralino (ventana nativa ligera):
+
+```bash
+npm run dev
+# en otra terminal (si prefieres correr neu manualmente):
+cd neutralino && npx @neutralinojs/neu run
+```
+
+La aplicación soporta Neutralino como runtime más ligero que Electron. El proyecto incluye un subdirectorio `neutralino/` con `neutralino.config.json` y un shim que expone `window.electronAPI` para mantener la compatibilidad con la UI existente.
 4. Para compilar el instalador (.exe): `npm run dist`
+
+### Configurar la ruta de Laragon
+
+La aplicación espera que introduzcas la ruta de instalación de Laragon en la interfaz de Ajustes la primera vez que la abras. También puedes preconfigurarla en `localStorage` usando la clave `mylaragon-config`. Ejemplo de contenido JSON:
+
+```json
+{
+	"laragonPath": "C:\\laragon",
+	"projectsPath": "C:\\laragon\\www",
+	"editor": "code",
+	"autoStart": false,
+	"language": "es",
+	"theme": "system"
+}
+```
 
 ## 🌍 Añadir Idiomas
 
