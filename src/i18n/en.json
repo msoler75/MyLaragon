@@ -73,9 +73,14 @@
   "stopAll": "Stop all",
   "active": "Active",
   "idle": "Idle",
+  "occupied": "Occupied",
   "running": "Running",
   "stopped": "Stopped",
   "switchVersion": "Switch Version",
   "switchPhp": "Switch PHP",
-  "back": "Back"
+  "back": "Back",
+  "portOccupied": "Port Occupied",
+  "portWarning": "Warning",
+  "portUsedBy": "Port in use by",
+  "diagnosticLog": "📋 Diagnostic"
 }

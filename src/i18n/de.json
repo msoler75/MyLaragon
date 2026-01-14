@@ -77,5 +77,9 @@
   "stopped": "Gestoppt",
   "switchVersion": "Version wechseln",
   "switchPhp": "PHP wechseln",
-  "back": "Zurück"
+  "back": "Zurück",
+  "portOccupied": "Port besetzt",
+  "portWarning": "Warnung",
+  "portUsedBy": "Port wird verwendet von",
+  "diagnosticLog": "📋 Diagnose"
 }

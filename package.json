@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "neutralino-dev": "cd neutralino && node dev.js",
     "vite": "vite",
-    "dist": "npm run build && cd neutralino && npx @neutralinojs/neu build"
+    "dist": "node scripts/build-config.js build && npm run build && cd neutralino && npx @neutralinojs/neu build && cd .. && node scripts/build-config.js restore",
+    "test:configs": "node scripts/auto_test_configs.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",

@@ -73,9 +73,14 @@
   "stopAll": "Detener todos",
   "active": "Activo",
   "idle": "Inactivo",
+  "occupied": "Ocupado",
   "running": "Ejecutando",
   "stopped": "Detenido",
   "switchVersion": "Cambiar Versión",
   "switchPhp": "Cambiar PHP",
-  "back": "Volver"
+  "back": "Volver",
+  "portOccupied": "Puerto Ocupado",
+  "portWarning": "Advertencia",
+  "portUsedBy": "Puerto en uso por",
+  "diagnosticLog": "📋 Diagnóstico"
 }

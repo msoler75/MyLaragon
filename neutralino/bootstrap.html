@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bootstrap</title>
+  <style>body{font-family:sans-serif;padding:24px;} .ok{color:green} .err{color:#c00}</style>
+</head>
+<body>
+  <h2>Bootstrap loader</h2>
+  <div id="status">Detectando entry point...</div>
+  <script>
+    (async function(){
+      const status = document.getElementById('status');
+
+      // Native popup test
+      try {
+        if (window.Neutralino && Neutralino.os && Neutralino.os.showMessageBox) {
+          Neutralino.os.showMessageBox('MyLaragon', 'Bootstrap started — attempting native API');
+        }
+      } catch (e) {
+        console.warn('Native popup failed', e);
+      }
+
+      const candidates = [
+        '/index.html',
+        '/www/index.html',
+        './www/index.html',
+        'www/index.html'
+      ];
+
+      async function tryFetch(url){
+        try{
+          const r = await fetch(url, {cache: 'no-cache'});
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const text = await r.text();
+          return {ok:true, url, text};
+        }catch(e){
+          return {ok:false, url, err: String(e)};
+        }
+      }
+
+      for (const c of candidates){
+        status.innerText = 'Attempting direct navigation to ' + c + ' ...';
+        const before = location.href;
+        try{
+          // Try direct navigation first (works with file:// and avoids fetch restrictions)
+          window.location.replace(c);
+        } catch(e) {
+          console.warn('Direct navigation failed for', c, e);
+        }
+        // Wait shortly; if location changed, navigation succeeded and script won't continue.
+        await new Promise(r => setTimeout(r, 700));
+        if (location.href !== before) return; // navigation worked
+
+        // If navigation didn't happen, try a fetch-based probe as fallback
+        status.innerText = 'Probing ' + c + ' via fetch ...';
+        const res = await tryFetch(c);
+        if (res.ok){
+          status.innerHTML = 'Loaded <span class="ok">' + c + '</span> — navegando a la entrada';
+          try{
+            if (window.Neutralino && Neutralino.filesystem && Neutralino.filesystem.writeFile){
+              await Neutralino.filesystem.writeFile('bootstrap-log.txt', 'Navigating (after probe) to ' + c + ' at ' + new Date().toISOString());
+            }
+          } catch(e) { /* ignore */ }
+          try { window.location.replace(c); } catch(e){ document.open(); document.write(res.text); document.close(); }
+          return;
+        } else {
+          const p = document.createElement('p');
+          p.className = 'err';
+          p.innerText = c + ' -> ' + res.err;
+          document.body.appendChild(p);
+        }
+      }
+
+      status.innerHTML = '<span class="err">No entry point found</span> — revise package/config. Revisando logs...';
+      // try to write diagnostic file
+      try{
+        if (window.Neutralino && Neutralino.filesystem && Neutralino.filesystem.writeFile){
+          await Neutralino.filesystem.writeFile('bootstrap-error.txt', 'No entry found - candidates tested: ' + candidates.join(', '));
+        }
+      }catch(e){ /* ignore */ }
+    })();
+  </script>
+</body>
+</html>

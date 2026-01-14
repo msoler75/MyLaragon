@@ -26,7 +26,8 @@ import {
   Terminal,
   SquareTerminal,
   FileText,
-  Cpu
+  Cpu,
+  AlertCircle
 } from 'lucide-react'
 
 // Detección automática de archivos de idioma
@@ -61,6 +62,7 @@ function App() {
   const [isBulkRunning, setIsBulkRunning] = useState(false)
   const [logs, setLogs] = useState([])
   const [unreadErrors, setUnreadErrors] = useState(0)
+  const [isMonitoring, setIsMonitoring] = useState(false)
   const [hiddenServices, setHiddenServices] = useState(() => {
     const saved = localStorage.getItem('hiddenServices')
     return saved ? JSON.parse(saved) : []
@@ -69,16 +71,18 @@ function App() {
   const t = translations[config.language] || translations.es
 
   const refreshingRef = useRef(false);
-  const loadServices = useCallback(async (isSilent = false) => {
+  const loadServices = useCallback(async (isSilent = false, hiddenServicesOverride = null) => {
     // Si viene de un evento de React o similar, isSilent no será estrictamente true
     const silent = isSilent === true;
+    // Usar hiddenServicesOverride si se proporciona, sino usar el estado actual
+    const hiddenToUse = hiddenServicesOverride !== null ? hiddenServicesOverride : hiddenServices;
     
     console.log('[APP] loadServices called, electronAPI:', !!window.electronAPI, 'isSilent:', isSilent);
     if (window.electronAPI && !refreshingRef.current) {
       refreshingRef.current = true;
       if (!silent) setLoading(true)
       try {
-        const servicesData = await window.electronAPI.getServices(hiddenServices)
+        const servicesData = await window.electronAPI.getServices(hiddenToUse)
         console.log('[APP] Servicios recibidos:', servicesData);
         // Solo actualizamos si no hay acciones en curso que puedan ser invalidadas
         setServices(servicesData)
@@ -190,11 +194,11 @@ function App() {
 
   // Sistema de actualización inteligente: pausa durante acciones para evitar parpadeos y race conditions
   useEffect(() => {
-    if (processingServices.length === 0) {
+    if (isMonitoring && processingServices.length === 0) {
       const interval = setInterval(() => loadServices(true), 7000)
       return () => clearInterval(interval)
     }
-  }, [hiddenServices, processingServices.length, loadServices])
+  }, [isMonitoring, hiddenServices, processingServices.length, loadServices])
 
   const handleStartService = async (serviceName) => {
     if (window.electronAPI && !processingServices.includes(serviceName)) {
@@ -261,11 +265,13 @@ function App() {
   }
 
   const toggleServiceVisibility = async (serviceName) => {
-    setHiddenServices(prev => 
-      prev.includes(serviceName) 
-        ? prev.filter(s => s !== serviceName) 
-        : [...prev, serviceName]
-    );
+    // Actualizar hiddenServices primero
+    const newHidden = hiddenServices.includes(serviceName) 
+      ? hiddenServices.filter(s => s !== serviceName) 
+      : [...hiddenServices, serviceName];
+    setHiddenServices(newHidden);
+    // Pasar explícitamente los servicios ocultos actualizados a loadServices
+    loadServices(false, newHidden);
   }
 
   const menuItems = [
@@ -331,6 +337,19 @@ function App() {
           </div>
           
           <div className="flex items-center space-x-4">
+            <button 
+              onClick={() => setIsMonitoring(prev => !prev)}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-xl border text-[10px] font-black shadow-sm transition-all uppercase tracking-wider ${
+                isMonitoring 
+                  ? 'bg-app-success/10 text-app-success border-app-success/30' 
+                  : 'bg-app-surface text-app-text-muted border-app-border hover:text-app-text'
+              }`}
+              title={isMonitoring ? 'Desactivar monitoreo auto' : 'Activar monitoreo auto'}
+            >
+              <Activity size={16} className={isMonitoring ? 'animate-pulse' : ''} />
+              <span className="hidden sm:inline">{isMonitoring ? 'Auto' : 'Manual'}</span>
+            </button>
+
             <button 
               onClick={loadServices}
               className="p-2 hover:bg-app-bg border border-transparent hover:border-app-border rounded-xl text-app-text-muted hover:text-app-text transition-all"
@@ -490,6 +509,7 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
             <ExternalLink size={12} />
             <span>WWW</span>
           </button>
+
           <div className="flex items-center space-x-2 bg-app-surface px-2.5 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm uppercase tracking-widest">
             <Activity size={10} className="text-app-success" />
             <span>{services.filter(s => s.status === 'running').length}/{services.length} {t.activeServices}</span>
@@ -502,11 +522,14 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
         {visibleServices.map(service => {
           const isProcessing = processingServices.includes(service.name);
           const isRunning = service.status === 'running';
+          const isPortOccupied = service.status === 'port-occupied';
           
           return (
             <div key={service.name} className={`group rounded-2xl shadow-sm border p-4 transition-all duration-300 relative flex flex-col h-full ${
               isRunning 
                 ? 'bg-app-surface border-app-success/50 shadow-[0_8px_30px_rgba(16,185,129,0.1)] ring-1 ring-app-success/20' 
+                : isPortOccupied
+                ? 'bg-app-surface border-app-warning/50 shadow-[0_8px_30px_rgba(249,115,22,0.1)] ring-1 ring-app-warning/20'
                 : 'bg-app-surface/80 border-app-border hover:shadow-lg hover:border-app-primary/30'
             }`}>
               <button 
@@ -649,29 +672,33 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
                     ? 'bg-app-primary/10 text-app-primary animate-pulse'
                     : isRunning 
                       ? 'bg-app-success text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] rotate-3' 
+                      : isPortOccupied
+                      ? 'bg-app-warning text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'
                       : 'bg-app-bg text-app-text-muted border border-app-border'
                 }`}>
                   {getServiceIcon(service.type)}
                 </div>
                 <div className="overflow-hidden flex-1">
-                  <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : 'text-app-text'}`}>{service.name}</h3>
+                  <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : isPortOccupied ? 'text-app-warning' : 'text-app-text'}`}>{service.name}</h3>
                   <div className="flex items-center space-x-1.5">
                     <span className={`rounded-full transition-all duration-500 ${
                       isProcessing 
                         ? 'h-2 w-2 bg-app-primary animate-bounce' 
                         : isRunning 
                           ? 'h-2.5 w-2.5 bg-app-success animate-pulse shadow-[0_0_8px_var(--app-success)]' 
+                          : isPortOccupied
+                          ? 'h-2.5 w-2.5 bg-app-warning animate-pulse shadow-[0_0_8px_rgba(249,115,22,0.8)]'
                           : 'h-2 w-2 bg-app-text-muted'
                     }`}></span>
-                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isRunning ? 'text-app-success/80' : 'text-app-text-muted'}`}>
-                      {isProcessing ? t.processing : isRunning ? t.online : t.offline}
+                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isRunning ? 'text-app-success/80' : isPortOccupied ? 'text-app-warning/80' : 'text-app-text-muted'}`}>
+                      {isProcessing ? t.processing : isRunning ? t.online : isPortOccupied ? (t.portOccupied || 'PUERTO OCUPADO') : t.offline}
                     </span>
                   </div>
                 </div>
               </div>
               
               <div className={`rounded-xl p-2.5 flex flex-col justify-center space-y-2 border mb-3 grow transition-all duration-500 ${
-                isRunning ? 'bg-app-success/5 border-app-success/20' : 'bg-app-bg/50 border-app-border'
+                isRunning ? 'bg-app-success/5 border-app-success/20' : isPortOccupied ? 'bg-app-warning/5 border-app-warning/20' : 'bg-app-bg/50 border-app-border'
               }`}>
                 {isProcessing ? (
                   <div className="flex-1 flex flex-col items-center justify-center space-y-1 py-2">
@@ -714,12 +741,33 @@ function Services({ services, hiddenServices, processingServices = [], isBulkRun
 
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${service.portInUse ? 'bg-app-success shadow-[0_0_8px_var(--app-success)]' : 'bg-app-text-muted'}`}></div>
-                        <span className={`text-[9px] font-black uppercase tracking-widest ${isRunning ? 'text-app-success/70' : 'text-app-text-muted'}`}>{t.portShort} {service.port || '---'}</span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${
+                          service.portInUse 
+                            ? (isPortOccupied ? 'bg-app-warning shadow-[0_0_8px_rgba(249,115,22,0.8)]' : 'bg-app-success shadow-[0_0_8px_var(--app-success)]') 
+                            : 'bg-app-text-muted'
+                        }`}></div>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isRunning ? 'text-app-success/70' : isPortOccupied ? 'text-app-warning/70' : 'text-app-text-muted'}`}>{t.portShort} {service.port || '---'}</span>
                       </div>
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase tracking-widest transition-all ${service.portInUse ? 'bg-app-success text-white shadow-sm' : 'bg-app-bg text-app-text-muted border border-app-border'}`}>
-                        {service.portInUse ? (t.active || 'ACTIVE') : (t.idle || 'IDLE')}
-                      </span>
+                      <div className="flex items-center space-x-1.5">
+                        {isPortOccupied && service.portOccupiedByName && (
+                          <div className="group/tooltip relative">
+                            <AlertCircle size={14} className="text-app-warning animate-pulse cursor-help" />
+                            <div className="absolute bottom-full right-0 mb-2 w-48 p-3 bg-app-surface border border-app-warning/50 rounded-xl shadow-2xl opacity-0 group-hover/tooltip:opacity-100 transition-all pointer-events-none z-50 animate-in fade-in slide-in-from-bottom-1">
+                              <span className="text-[10px] font-black text-app-warning uppercase tracking-widest block mb-1">⚠️ {t.portWarning || 'ADVERTENCIA'}</span>
+                              <span className="text-xs font-bold text-app-text block leading-relaxed">{t.portUsedBy || 'PUERTO EN USO POR'}: <span className="text-app-warning font-black">{service.portOccupiedByName}</span></span>
+                            </div>
+                          </div>
+                        )}
+                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase tracking-widest transition-all ${
+                          service.portInUse 
+                            ? (isPortOccupied ? 'bg-app-warning text-white shadow-sm' : 'bg-app-success text-white shadow-sm') 
+                            : 'bg-app-bg text-app-text-muted border border-app-border'
+                        }`}>
+                          {service.portInUse 
+                            ? (isPortOccupied ? (t.occupied || 'OCUPADO') : (t.active || 'ACTIVE')) 
+                            : (t.idle || 'IDLE')}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between">

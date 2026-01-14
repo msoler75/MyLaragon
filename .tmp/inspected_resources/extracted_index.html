@@ -1,0 +1,94 @@
+PI');
+        }
+      } catch (e) {
+        console.warn('Native popup failed', e);
+      }
+
+      const candidates = [
+        '/index.html',
+        '/www/index.html',
+        './www/index.html',
+        'www/index.html'
+      ];
+
+      async function tryFetch(url){
+        try{
+          const r = await fetch(url, {cache: 'no-cache'});
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const text = await r.text();
+          return {ok:true, url, text};
+        }catch(e){
+          return {ok:false, url, err: String(e)};
+        }
+      }
+
+      for (const c of candidates){
+        status.innerText = 'Attempting direct navigation to ' + c + ' ...';
+        const before = location.href;
+        try{
+          // Try direct navigation first (works with file:// and avoids fetch restrictions)
+          window.location.replace(c);
+        } catch(e) {
+          console.warn('Direct navigation failed for', c, e);
+        }
+        // Wait shortly; if location changed, navigation succeeded and script won't continue.
+        await new Promise(r => setTimeout(r, 700));
+        if (location.href !== before) return; // navigation worked
+
+        // If navigation didn't happen, try a fetch-based probe as fallback
+        status.innerText = 'Probing ' + c + ' via fetch ...';
+        const res = await tryFetch(c);
+        if (res.ok){
+          status.innerHTML = 'Loaded <span class="ok">' + c + '</span> — navegando a la entrada';
+          try{
+            if (window.Neutralino && Neutralino.filesystem && Neutralino.filesystem.writeFile){
+              await Neutralino.filesystem.writeFile('bootstrap-log.txt', 'Navigating (after probe) to ' + c + ' at ' + new Date().toISOString());
+            }
+          } catch(e) { /* ignore */ }
+          try { window.location.replace(c); } catch(e){ document.open(); document.write(res.text); document.close(); }
+          return;
+        } else {
+          const p = document.createElement('p');
+          p.className = 'err';
+          p.innerText = c + ' -> ' + res.err;
+          document.body.appendChild(p);
+        }
+      }
+
+      status.innerHTML = '<span class="err">No entry point found</span> — revise package/config. Revisando logs...';
+      // try to write diagnostic file
+      try{
+        if (window.Neutralino && Neutralino.filesystem && Neutralino.filesystem.writeFile){
+          await Neutralino.filesystem.writeFile('bootstrap-error.txt', 'No entry found - candidates tested: ' + candidates.join(', '));
+        }
+      }catch(e){ /* ignore */ }
+    })();
+  </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyLaragon</title>
+    <!-- Neutralino SDK and Shim - MUST load FIRST -->
+    <script src="/www/neutralino.js"></script>
+    <script>
+      // Loader with explicit logging in case neutralino.js fails to load
+      (function(){
+        try{
+          console.log('Attempting to detect Neutralino...');
+          if (typeof Neutralino === 'undefined') {
+            console.log('Neutralino not present yet — ensuring script tag present');
+            var s = document.createElement('script');
+            s.src = '/www/neutralino.js';
+            s.onload = function(){ console.log('neutralino.js loaded via loader'); };
+            s.onerror = function(e){ console.warn('neutralino.js failed to load (loader)', e); };
+            document.head.appendChild(s);
+          } else {
+            console.log('Neutralino global already present');
+          }
+        }catch(e){ console.warn('Loader error', e); }
+      })();
+    </sc
