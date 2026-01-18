@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { exec, spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
+import https from 'https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +12,9 @@ const __dirname = path.dirname(__filename);
 // Ruta para guardar la configuración del usuario
 const userDataPath = app.getPath('userData');
 const configPath = path.join(userDataPath, 'user-config.json');
-const logPath = path.join(userDataPath, 'app.log');
+
+// El log ahora estará en la raíz de la app para fácil acceso
+let logPath = path.join(app.isPackaged ? path.dirname(app.getPath('exe')) : path.resolve(__dirname, '..'), 'webservdev.log');
 
 let mainWindow;
 
@@ -24,18 +27,23 @@ function log(message, level = 'INFO') {
   console.log(logMessage.trim());
   
   try {
+    // Si logPath no ha sido inicializado correctamente todavía, intentamos uno temporal
     fs.appendFileSync(logPath, logMessage);
     
     // Enviar log al frontend si la ventana está disponible
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app-log', {
-        timestamp: timestamp, // Enviamos el ISO para que el frontend lo formatee igual que el historial
+        timestamp: timestamp,
         message: cleanMessage,
         level: level
       });
     }
   } catch (err) {
-    console.error('Error writing to log file:', err);
+    // Si falla escribir en appPath (por permisos), intentar en userData
+    try {
+      const fallbackLog = path.join(userDataPath, 'app.log');
+      fs.appendFileSync(fallbackLog, `[FALLBACK] ${logMessage}`);
+    } catch (e) {}
   }
 }
 
@@ -62,13 +70,16 @@ try {
 }
 
 // Configuración por defecto
+const defaultRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : path.resolve(__dirname, '..');
 let userConfig = {
-  laragonPath: 'C:\\laragon',
-  projectsPath: 'C:\\laragon\\www',
+  appPath: defaultRoot,
+  projectsPath: path.join(defaultRoot, 'www'),
   editor: 'notepad', // notepad, code, notepad++, default
   autoStart: false,
   language: 'es', // es, en, de
-  theme: 'system' // system, light, dark, sepia
+  theme: 'system', // system, light, dark, sepia
+  lastUpdateCheck: 0,
+  isPortable: true
 };
 
 // Cargar configuración guardada
@@ -76,8 +87,10 @@ function loadUserConfig() {
   try {
     if (fs.existsSync(configPath)) {
       const data = fs.readFileSync(configPath, 'utf-8');
-      userConfig = { ...userConfig, ...JSON.parse(data) };
-      log('User config loaded successfully');
+      const loaded = JSON.parse(data);
+      // Siempre forzar appPath al directorio actual en modo portable
+      userConfig = { ...userConfig, ...loaded, appPath: defaultRoot };
+      log(`User config loaded successfully (Portable mode: appPath fixed to ${defaultRoot})`);
     }
   } catch (error) {
     log(`Error loading config: ${error.message}`, 'ERROR');
@@ -133,11 +146,11 @@ const execAsync = (command) => {
   });
 };
 
-// Leer configuración de Laragon
-function getLaragonConfig() {
+// Leer configuración de App
+function getAppConfig() {
   const possiblePaths = [
-    path.join(userConfig.laragonPath, 'laragon.ini'),
-    path.join(userConfig.laragonPath, 'usr', 'laragon.ini')
+    path.join(userConfig.appPath, 'app.ini'),
+    path.join(userConfig.appPath, 'usr', 'app.ini')
   ];
 
   let iniPath = possiblePaths[0];
@@ -166,10 +179,10 @@ function getLaragonConfig() {
         }
       }
     } else {
-      log(`Laragon config not found at: ${iniPath}`, 'WARNING');
+      log(`App config not found at: ${iniPath}`, 'WARNING');
     }
   } catch (error) {
-    log(`Error reading laragon.ini: ${error.message}`, 'ERROR');
+    log(`Error reading app.ini: ${error.message}`, 'ERROR');
   }
   return config;
 }
@@ -178,19 +191,19 @@ console.log('Main process starting...');
 
 // Detectar servicios disponibles
 function detectServices() {
-  const config = getLaragonConfig();
+  const config = getAppConfig();
   const services = [];
 
   const getAvailableVersions = (serviceType) => {
     const pathsToCheck = [serviceType];
-    // Aliases comunes en Laragon
+    // Aliases comunes en App
     if (serviceType === 'mysql') pathsToCheck.push('mariadb');
     if (serviceType === 'mariadb') pathsToCheck.push('mysql');
     
     let allVersions = [];
 
     for (const type of pathsToCheck) {
-      const binPath = path.join(userConfig.laragonPath, 'bin', type);
+      const binPath = path.join(userConfig.appPath, 'bin', type);
       if (fs.existsSync(binPath)) {
         try {
           const dirs = fs.readdirSync(binPath)
@@ -207,38 +220,46 @@ function detectServices() {
   const availablePhp = getAvailableVersions('php');
   const phpVersion = config.php?.version || (availablePhp.length > 0 ? availablePhp[0] : undefined);
   
-  if (config.apache && config.apache.version) {
-    const apacheBase = path.join(userConfig.laragonPath, 'bin', 'apache', config.apache.version);
+  // Detectar Apache
+  const availableApache = getAvailableVersions('apache');
+  const apacheVersion = config.apache?.version || (availableApache.length > 0 ? availableApache[0] : undefined);
+  
+  if (apacheVersion) {
+    const apacheBase = path.join(userConfig.appPath, 'bin', 'apache', apacheVersion);
     const documentRoot = config.apache?.documentroot || userConfig.projectsPath;
     const apacheConfigs = [
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
       { label: 'httpd.conf', path: path.join(apacheBase, 'conf', 'httpd.conf') },
       { label: 'httpd-vhosts.conf', path: path.join(apacheBase, 'conf', 'extra', 'httpd-vhosts.conf') },
-      { label: 'php.ini', path: phpVersion ? path.join(userConfig.laragonPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
-      { label: 'php_errors.log', path: path.join(userConfig.laragonPath, 'tmp', 'php_errors.log') }
+      { label: 'php.ini', path: phpVersion ? path.join(userConfig.appPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
+      { label: 'php_errors.log', path: path.join(userConfig.appPath, 'tmp', 'php_errors.log') }
     ].filter(c => c.path && (c.type === 'folder' || fs.existsSync(c.path)));
 
     services.push({ 
       name: 'Apache', 
       type: 'apache', 
-      version: config.apache.version,
+      version: apacheVersion,
       phpVersion: phpVersion,
       configs: apacheConfigs,
-      availableVersions: getAvailableVersions('apache'),
-      availablePhpVersions: getAvailableVersions('php')
+      availableVersions: availableApache,
+      availablePhpVersions: availablePhp
     });
   }
 
-  if (config.mysql && config.mysql.version) {
+  // Detectar MySQL/MariaDB
+  const availableMysql = getAvailableVersions('mysql');
+  const mysqlVersion = config.mysql?.version || (availableMysql.length > 0 ? availableMysql[0] : undefined);
+
+  if (mysqlVersion) {
     // Buscar la ruta base real (puede estar en bin/mysql o bin/mariadb)
-    let mysqlBase = path.join(userConfig.laragonPath, 'bin', 'mysql', config.mysql.version);
+    let mysqlBase = path.join(userConfig.appPath, 'bin', 'mysql', mysqlVersion);
     if (!fs.existsSync(mysqlBase)) {
-      mysqlBase = path.join(userConfig.laragonPath, 'bin', 'mariadb', config.mysql.version);
+      mysqlBase = path.join(userConfig.appPath, 'bin', 'mariadb', mysqlVersion);
     }
 
     const mysqlConfigs = [
       { label: 'my.ini', path: path.join(mysqlBase, 'my.ini') },
-      { label: 'error.log', path: path.join(userConfig.laragonPath, 'data', 'mysql', 'error.log') }
+      { label: 'error.log', path: path.join(userConfig.appPath, 'data', 'mysql', 'error.log') }
     ];
 
     // Buscar otros archivos .log en la carpeta de la versión
@@ -262,13 +283,13 @@ function detectServices() {
           });
         }
 
-        // Escanear la carpeta Laragon/data/ para encontrar TODOS los archivos .log
-        const laragonDataPath = path.join(userConfig.laragonPath, 'data');
-        if (fs.existsSync(laragonDataPath)) {
+        // Escanear la carpeta App/data/ para encontrar TODOS los archivos .log
+        const AppDataPath = path.join(userConfig.appPath, 'data');
+        if (fs.existsSync(AppDataPath)) {
           try {
-            const dataSubfolders = fs.readdirSync(laragonDataPath);
+            const dataSubfolders = fs.readdirSync(AppDataPath);
             dataSubfolders.forEach(subfolder => {
-              const subfolderPath = path.join(laragonDataPath, subfolder);
+              const subfolderPath = path.join(AppDataPath, subfolder);
               if (fs.statSync(subfolderPath).isDirectory()) {
                 const subFiles = fs.readdirSync(subfolderPath);
                 subFiles.forEach(file => {
@@ -302,45 +323,57 @@ function detectServices() {
     services.push({ 
       name: 'MySQL', 
       type: 'mysql', 
-      version: config.mysql.version,
+      version: mysqlVersion,
       configs: uniqueConfigs,
-      availableVersions: getAvailableVersions('mysql')
+      availableVersions: availableMysql
     });
   }
 
-  if (config.nginx && config.nginx.version) {
-    const nginxBase = path.join(userConfig.laragonPath, 'bin', 'nginx', config.nginx.version);
-    const documentRoot = config.apache?.documentroot || userConfig.projectsPath; // Nginx suele compartirlo
+  // Detectar Nginx
+  const availableNginx = getAvailableVersions('nginx');
+  const nginxVersion = config.nginx?.version || (availableNginx.length > 0 ? availableNginx[0] : undefined);
+
+  if (nginxVersion) {
+    const nginxBase = path.join(userConfig.appPath, 'bin', 'nginx', nginxVersion);
+    const documentRoot = config.apache?.documentroot || userConfig.projectsPath; 
     const nginxConfigs = [
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
       { label: 'nginx.conf', path: path.join(nginxBase, 'conf', 'nginx.conf') },
-      { label: 'php.ini', path: phpVersion ? path.join(userConfig.laragonPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
-      { label: 'php_errors.log', path: path.join(userConfig.laragonPath, 'tmp', 'php_errors.log') }
+      { label: 'php.ini', path: phpVersion ? path.join(userConfig.appPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
+      { label: 'php_errors.log', path: path.join(userConfig.appPath, 'tmp', 'php_errors.log') }
     ].filter(c => c.path && (c.type === 'folder' || fs.existsSync(c.path)));
     services.push({ 
       name: 'Nginx', 
       type: 'nginx', 
-      version: config.nginx.version, 
+      version: nginxVersion, 
       phpVersion: phpVersion,
       configs: nginxConfigs,
-      availableVersions: getAvailableVersions('nginx'),
-      availablePhpVersions: getAvailableVersions('php')
+      availableVersions: availableNginx,
+      availablePhpVersions: availablePhp
     });
   }
-  if (config.postgresql && config.postgresql.version) {
+
+  // Detectar PostgreSQL
+  const availablePostgres = getAvailableVersions('postgresql');
+  const postgresVersion = config.postgresql?.version || (availablePostgres.length > 0 ? availablePostgres[0] : undefined);
+  if (postgresVersion) {
     services.push({ 
       name: 'PostgreSQL', 
       type: 'postgresql', 
-      version: config.postgresql.version,
-      availableVersions: getAvailableVersions('postgresql')
+      version: postgresVersion,
+      availableVersions: availablePostgres
     });
   }
-  if (config.redis && config.redis.version) {
+
+  // Detectar Redis
+  const availableRedis = getAvailableVersions('redis');
+  const redisVersion = config.redis?.version || (availableRedis.length > 0 ? availableRedis[0] : undefined);
+  if (redisVersion) {
     services.push({ 
       name: 'Redis', 
       type: 'redis', 
-      version: config.redis.version,
-      availableVersions: getAvailableVersions('redis')
+      version: redisVersion,
+      availableVersions: availableRedis
     });
   }
   if (config.memcached && config.memcached.version) {
@@ -355,7 +388,7 @@ function detectServices() {
   // Mailpit detection
   let mailpitVersion = config.mailpit?.version;
   if (!mailpitVersion) {
-    const mailpitDir = path.join(userConfig.laragonPath, 'bin', 'mailpit');
+    const mailpitDir = path.join(userConfig.appPath, 'bin', 'mailpit');
     if (fs.existsSync(mailpitDir)) {
       const dirs = fs.readdirSync(mailpitDir).filter(f => {
         const fullPath = path.join(mailpitDir, f);
@@ -365,7 +398,7 @@ function detectServices() {
     }
   }
   if (mailpitVersion) {
-    const mailpitBase = path.join(userConfig.laragonPath, 'bin', 'mailpit', mailpitVersion);
+    const mailpitBase = path.join(userConfig.appPath, 'bin', 'mailpit', mailpitVersion);
     const mailpitConfigs = [
       { label: 'mailpit.log', path: path.join(mailpitBase, 'mailpit.log') }
     ];
@@ -382,7 +415,7 @@ function detectServices() {
   // MongoDB detection
   let mongodbVersion = config.mongodb?.version;
   if (!mongodbVersion) {
-    const mongodbDir = path.join(userConfig.laragonPath, 'bin', 'mongodb');
+    const mongodbDir = path.join(userConfig.appPath, 'bin', 'mongodb');
     if (fs.existsSync(mongodbDir)) {
       const dirs = fs.readdirSync(mongodbDir).filter(f => {
         const fullPath = path.join(mongodbDir, f);
@@ -393,7 +426,7 @@ function detectServices() {
     }
   }
   if (mongodbVersion) {
-    const mongodbBase = path.join(userConfig.laragonPath, 'bin', 'mongodb', mongodbVersion);
+    const mongodbBase = path.join(userConfig.appPath, 'bin', 'mongodb', mongodbVersion);
     const mongodbConfigs = [
       { label: 'mongod.cfg', path: path.join(mongodbBase, 'bin', 'mongod.cfg') }
     ].filter(c => fs.existsSync(c.path));
@@ -529,18 +562,22 @@ ipcMain.handle('stop-service', async (event, serviceName) => {
   }
 });
 
-ipcMain.handle('open-laragon-folder', async () => {
-  exec(`explorer "${userConfig.laragonPath}"`);
+ipcMain.handle('open-App-folder', async () => {
+  exec(`explorer "${userConfig.appPath}"`);
+});
+
+ipcMain.handle('open-app-folder', async () => {
+  exec(`explorer "${defaultRoot}"`);
 });
 
 ipcMain.handle('open-document-root', async () => {
-  const config = getLaragonConfig();
+  const config = getAppConfig();
   const documentRoot = config.apache?.DocumentRoot || userConfig.projectsPath;
   exec(`explorer "${documentRoot}"`);
 });
 
 ipcMain.handle('open-db-tool', async () => {
-  const heidiPath = path.join(userConfig.laragonPath, 'bin', 'heidisql', 'heidisql.exe');
+  const heidiPath = path.join(userConfig.appPath, 'bin', 'heidisql', 'heidisql.exe');
   if (fs.existsSync(heidiPath)) {
     exec(`"${heidiPath}"`);
   } else {
@@ -561,7 +598,7 @@ ipcMain.handle('open-config-file', async (event, { path: filePath, type = 'file'
         command = `code "${filePath}"`;
         break;
       case 'notepad++':
-        const nppPath = path.join(userConfig.laragonPath, 'bin', 'notepad++', 'notepad++.exe');
+        const nppPath = path.join(userConfig.appPath, 'bin', 'notepad++', 'notepad++.exe');
         if (fs.existsSync(nppPath)) {
           command = `"${nppPath}" "${filePath}"`;
         } else {
@@ -583,7 +620,7 @@ ipcMain.handle('open-config-file', async (event, { path: filePath, type = 'file'
 
 // Nuevos handlers para herramientas
 ipcMain.handle('open-terminal', async () => {
-  exec(`start cmd.exe /K "cd /d ${userConfig.laragonPath}"`);
+  exec(`start cmd.exe /K "cd /d ${userConfig.appPath}"`);
 });
 
 ipcMain.handle('open-hosts', async () => {
@@ -596,7 +633,7 @@ ipcMain.handle('open-hosts', async () => {
       command = `code "${hostsPath}"`;
       break;
     case 'notepad++':
-      const nppPath = path.join(userConfig.laragonPath, 'bin', 'notepad++', 'notepad++.exe');
+      const nppPath = path.join(userConfig.appPath, 'bin', 'notepad++', 'notepad++.exe');
       if (fs.existsSync(nppPath)) {
         command = `"${nppPath}" "${hostsPath}"`;
       } else {
@@ -616,8 +653,8 @@ ipcMain.handle('open-hosts', async () => {
 ipcMain.handle('update-service-version', async (event, { type, version }) => {
   log(`Updating ${type} version to ${version}`);
   const possiblePaths = [
-    path.join(userConfig.laragonPath, 'laragon.ini'),
-    path.join(userConfig.laragonPath, 'usr', 'laragon.ini')
+    path.join(userConfig.appPath, 'app.ini'),
+    path.join(userConfig.appPath, 'usr', 'app.ini')
   ];
 
   let iniPath = possiblePaths[0];
@@ -630,7 +667,7 @@ ipcMain.handle('update-service-version', async (event, { type, version }) => {
 
   try {
     if (!fs.existsSync(iniPath)) {
-      throw new Error('laragon.ini not found');
+      throw new Error('app.ini not found');
     }
 
     let content = fs.readFileSync(iniPath, 'utf-8');
@@ -657,20 +694,20 @@ ipcMain.handle('update-service-version', async (event, { type, version }) => {
     }
 
     fs.writeFileSync(iniPath, newLines.join('\n'));
-    log('laragon.ini updated successfully');
+    log('app.ini updated successfully');
 
     // Si cambiamos PHP, intentar actualizar la configuración de Apache (mod_php.conf)
     if (type.toLowerCase() === 'php') {
       try {
-        const modPhpPath = path.join(userConfig.laragonPath, 'etc', 'apache2', 'mod_php.conf');
+        const modPhpPath = path.join(userConfig.appPath, 'etc', 'apache2', 'mod_php.conf');
         if (fs.existsSync(modPhpPath)) {
-          const phpDir = path.join(userConfig.laragonPath, 'bin', 'php', version);
+          const phpDir = path.join(userConfig.appPath, 'bin', 'php', version);
           if (fs.existsSync(phpDir)) {
             const files = fs.readdirSync(phpDir);
             const phpDll = files.find(f => f.match(/^php\d+apache2_4\.dll$/i));
             
             if (phpDll) {
-              const newContent = `# This file is generated by MyLaragon\n` +
+              const newContent = `# This file is generated by MyApp\n` +
                                 `LoadModule php_module "${path.join(phpDir, phpDll).replace(/\\/g, '/')}"\n` +
                                 `PHPIniDir "${phpDir.replace(/\\/g, '/')}"\n`;
               fs.writeFileSync(modPhpPath, newContent);
@@ -685,7 +722,7 @@ ipcMain.handle('update-service-version', async (event, { type, version }) => {
 
     return { success: true };
   } catch (error) {
-    log(`Error updating laragon.ini: ${error.message}`, 'ERROR');
+    log(`Error updating app.ini: ${error.message}`, 'ERROR');
     return { success: false, message: error.message };
   }
 });
@@ -710,7 +747,7 @@ ipcMain.handle('open-startup-log', async () => {
       command = `code "${startupLogPath}"`;
       break;
     case 'notepad++':
-      const nppPath = path.join(userConfig.laragonPath, 'bin', 'notepad++', 'notepad++.exe');
+      const nppPath = path.join(userConfig.appPath, 'bin', 'notepad++', 'notepad++.exe');
       if (fs.existsSync(nppPath)) {
         command = `"${nppPath}" "${startupLogPath}"`;
       } else {
@@ -827,10 +864,10 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
       case 'mariadb':
         port = 3306;
         processName = 'mysqld.exe';
-        // Ruta esperada del ejecutable de Laragon
-        expectedPath = path.join(userConfig.laragonPath, 'bin', 'mysql', service.version, 'bin', 'mysqld.exe');
+        // Ruta esperada del ejecutable de App
+        expectedPath = path.join(userConfig.appPath, 'bin', 'mysql', service.version, 'bin', 'mysqld.exe');
         if (!fs.existsSync(expectedPath)) {
-          expectedPath = path.join(userConfig.laragonPath, 'bin', 'mysql', service.version, 'mysqld.exe');
+          expectedPath = path.join(userConfig.appPath, 'bin', 'mysql', service.version, 'mysqld.exe');
         }
         break;
       case 'postgresql':
@@ -867,7 +904,7 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
     
     // Para MySQL/MariaDB, necesitamos verificar la ruta del proceso
     if ((service.type === 'mysql' || service.type === 'mariadb') && expectedPath) {
-      // Si el puerto está en uso, verificamos si es nuestro proceso de Laragon
+      // Si el puerto está en uso, verificamos si es nuestro proceso de App
       if (portInUse && portPid) {
         // Usamos wmic para obtener la ruta completa del ejecutable del proceso
         return new Promise((resolve) => {
@@ -894,7 +931,7 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
                 resolve({ 
                   status: 'running', 
                   port, 
-                  details: `Proceso ${processName} de Laragon (v${service.version}) escuchando en puerto ${port}.`,
+                  details: `Proceso ${processName} de App (v${service.version}) escuchando en puerto ${port}.`,
                   processRunning: true,
                   portInUse: true,
                   processName
@@ -997,7 +1034,7 @@ async function startService(service) {
     log(`Error en limpieza: ${e.message}`, 'WARNING');
   }
 
-  let binPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version);
+  let binPath = path.join(userConfig.appPath, 'bin', service.type, service.version);
   if (fs.existsSync(path.join(binPath, 'bin'))) {
     binPath = path.join(binPath, 'bin');
   }
@@ -1024,7 +1061,7 @@ async function startService(service) {
   
   switch (service.type) {
     case 'apache':
-      const confPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'conf', 'httpd.conf');
+      const confPath = path.join(userConfig.appPath, 'bin', service.type, service.version, 'conf', 'httpd.conf');
       
       // Verificar que el archivo de configuración exista
       if (!fs.existsSync(confPath)) {
@@ -1131,11 +1168,11 @@ async function startService(service) {
       break;
     case 'mysql':
     case 'mariadb':
-      let baseDir = path.join(userConfig.laragonPath, 'bin', service.type, service.version);
+      let baseDir = path.join(userConfig.appPath, 'bin', service.type, service.version);
       // Ajuste si el binario está en la carpeta alternativa (mariadb vs mysql)
       if (!fs.existsSync(baseDir)) {
         const altType = service.type === 'mysql' ? 'mariadb' : 'mysql';
-        const altDir = path.join(userConfig.laragonPath, 'bin', altType, service.version);
+        const altDir = path.join(userConfig.appPath, 'bin', altType, service.version);
         if (fs.existsSync(altDir)) baseDir = altDir;
       }
 
@@ -1145,20 +1182,20 @@ async function startService(service) {
       const shortVersion = cleanVersion.split('.').slice(0, 2).join('.');
       
       const possibleDataDirs = [
-        path.join(userConfig.laragonPath, 'data', rawVersion),
-        path.join(userConfig.laragonPath, 'data', `mysql-${rawVersion}`),
-        path.join(userConfig.laragonPath, 'data', `mysql-${cleanVersion}`),
-        path.join(userConfig.laragonPath, 'data', `mariadb-${cleanVersion}`),
-        path.join(userConfig.laragonPath, 'data', `mysql-${shortVersion}`),
-        path.join(userConfig.laragonPath, 'data', `mariadb-${shortVersion}`),
-        path.join(userConfig.laragonPath, 'data', shortVersion),
-        path.join(userConfig.laragonPath, 'data', 'mysql')
+        path.join(userConfig.appPath, 'data', rawVersion),
+        path.join(userConfig.appPath, 'data', `mysql-${rawVersion}`),
+        path.join(userConfig.appPath, 'data', `mysql-${cleanVersion}`),
+        path.join(userConfig.appPath, 'data', `mariadb-${cleanVersion}`),
+        path.join(userConfig.appPath, 'data', `mysql-${shortVersion}`),
+        path.join(userConfig.appPath, 'data', `mariadb-${shortVersion}`),
+        path.join(userConfig.appPath, 'data', shortVersion),
+        path.join(userConfig.appPath, 'data', 'mysql')
       ];
 
-      const dataDir = possibleDataDirs.find(d => fs.existsSync(d)) || path.join(userConfig.laragonPath, 'data', 'mysql');
+      const dataDir = possibleDataDirs.find(d => fs.existsSync(d)) || path.join(userConfig.appPath, 'data', 'mysql');
       const myIni = path.join(baseDir, 'my.ini');
       
-      // Crear un my.ini limpio sin componentes problemáticos (alternativa al my.ini original de Laragon)
+      // Crear un my.ini limpio sin componentes problemáticos (alternativa al my.ini original de App)
       const tempMyIniPath = path.join(userDataPath, 'mysql-clean.ini');
       
       try {
@@ -1224,7 +1261,7 @@ max_allowed_packet=512M
       log(`Ejecutable: ${fullExePath}`);
       log(`Argumentos: ${mysqlArgs.join(' ')}`);
       
-      // Función para auto-corregir el my.ini original de Laragon
+      // Función para auto-corregir el my.ini original de App
       const fixComponentError = () => {
         try {
           if (fs.existsSync(myIni)) {
@@ -1391,7 +1428,7 @@ max_allowed_packet=512M
       break;
     case 'redis':
       log(`Iniciando Redis...`);
-      const redisConf = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'redis.conf');
+      const redisConf = path.join(userConfig.appPath, 'bin', service.type, service.version, 'redis.conf');
       
       return new Promise((resolve, reject) => {
         const redisProcess = spawn(fullExePath, fs.existsSync(redisConf) ? [redisConf] : [], { 
@@ -1530,7 +1567,7 @@ max_allowed_packet=512M
       
     case 'mongodb':
       log(`Iniciando MongoDB...`);
-      const mongoDataPath = path.join(userConfig.laragonPath, 'data', 'mongodb');
+      const mongoDataPath = path.join(userConfig.appPath, 'data', 'mongodb');
       if (!fs.existsSync(mongoDataPath)) {
         fs.mkdirSync(mongoDataPath, { recursive: true });
       }
@@ -1619,7 +1656,7 @@ async function stopService(service) {
 
   log(`Intentando detener ${service.name} (${exeName}) de forma elegante...`);
 
-  let binPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version);
+  let binPath = path.join(userConfig.appPath, 'bin', service.type, service.version);
   if (fs.existsSync(path.join(binPath, 'bin'))) {
     binPath = path.join(binPath, 'bin');
   }
@@ -1628,7 +1665,7 @@ async function stopService(service) {
   try {
     switch (service.type) {
       case 'apache':
-        const confPath = path.join(userConfig.laragonPath, 'bin', service.type, service.version, 'conf', 'httpd.conf');
+        const confPath = path.join(userConfig.appPath, 'bin', service.type, service.version, 'conf', 'httpd.conf');
         // Comando nativo de Apache para detención
         await execAsync(`"${fullExePath}" -k stop -f "${confPath}"`).catch(() => {});
         // Fallback: señal de cierre normal
@@ -1642,7 +1679,7 @@ async function stopService(service) {
       case 'mariadb':
         const mysqlAdmin = path.join(binPath, 'mysqladmin.exe');
         if (fs.existsSync(mysqlAdmin)) {
-          // Laragon por defecto no tiene contraseña root
+          // App por defecto no tiene contraseña root
           await execAsync(`"${mysqlAdmin}" -u root shutdown`).catch(() => {});
         }
         await execAsync(`taskkill /IM ${exeName}`).catch(() => {});
@@ -1656,7 +1693,7 @@ async function stopService(service) {
         break;
       case 'postgresql':
         const pgCtl = path.join(binPath, 'pg_ctl.exe');
-        const pgData = path.join(userConfig.laragonPath, 'data', 'postgresql');
+        const pgData = path.join(userConfig.appPath, 'data', 'postgresql');
         if (fs.existsSync(pgCtl)) {
           await execAsync(`"${pgCtl}" stop -D "${pgData}"`).catch(() => {});
         }
@@ -1710,7 +1747,7 @@ ipcMain.handle('open-in-vscode', async (event, projectPath) => {
       command = `code "${projectPath}"`;
       break;
     case 'notepad++':
-      const nppPath = path.join(userConfig.laragonPath, 'bin', 'notepad++', 'notepad++.exe');
+      const nppPath = path.join(userConfig.appPath, 'bin', 'notepad++', 'notepad++.exe');
       if (fs.existsSync(nppPath)) {
         command = `"${nppPath}" "${projectPath}"`;
       } else {
@@ -1764,10 +1801,158 @@ ipcMain.handle('select-directory', async () => {
   }
 });
 
+// --- Nuevos Handlers para MyApp Independiente ---
+
+ipcMain.handle('get-remote-services', async () => {
+  try {
+    const servicesPath = path.join(defaultRoot, 'services.json');
+    if (fs.existsSync(servicesPath)) {
+      const data = fs.readFileSync(servicesPath, 'utf-8');
+      return JSON.parse(data);
+    }
+    return { services: [] };
+  } catch (error) {
+    log(`Error loading remote services: ${error.message}`, 'ERROR');
+    return { services: [] };
+  }
+});
+
+ipcMain.handle('install-service', async (event, { url, serviceId, version, installPath }) => {
+  const tempDir = path.join(defaultRoot, 'tmp');
+  const fileName = `${serviceId}-${version}.zip`;
+  const filePath = path.join(tempDir, fileName);
+  const destDir = path.join(defaultRoot, installPath, version);
+
+  log(`Iniciando instalación de ${serviceId} v${version}...`);
+
+  try {
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    if (!fs.existsSync(path.dirname(destDir))) fs.mkdirSync(path.dirname(destDir), { recursive: true });
+
+    // 1. Descargar
+    log(`Descargando ${url}...`);
+    await new Promise((resolve, reject) => {
+      const file = fs.createWriteStream(filePath);
+      https.get(url, (response) => {
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          https.get(response.headers.location, (res) => {
+            res.pipe(file);
+            file.on('finish', () => {
+              file.close();
+              resolve();
+            });
+          }).on('error', reject);
+        } else {
+          response.pipe(file);
+          file.on('finish', () => {
+            file.close();
+            resolve();
+          });
+        }
+      }).on('error', (err) => {
+        fs.unlink(filePath, () => {});
+        reject(err);
+      });
+    });
+
+    // 2. Extraer
+    log(`Extrayendo en ${destDir}...`);
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    
+    // Usamos PowerShell para extraer sin dependencias externas
+    const psCommand = `powershell.exe -Command "Expand-Archive -Path '${filePath}' -DestinationPath '${destDir}' -Force"`;
+    await execAsync(psCommand);
+
+    log(`Extracción completada.`);
+
+    // 3. Limpiar
+    fs.unlinkSync(filePath);
+
+    // 4. Actualizar app.ini si el servicio no tiene versión activa
+    updateAppIniVersion(serviceId, version);
+
+    return { success: true, message: `${serviceId} v${version} instalado correctamente.` };
+  } catch (error) {
+    log(`Error en instalación: ${error.message}`, 'ERROR');
+    return { success: false, error: error.message };
+  }
+});
+
+function updateAppIniVersion(serviceId, version) {
+  try {
+    const iniPath = path.join(defaultRoot, 'app.ini');
+    if (fs.existsSync(iniPath)) {
+      let content = fs.readFileSync(iniPath, 'utf-8');
+      const lines = content.split('\n');
+      let sectionFound = false;
+      const newLines = lines.map(line => {
+        const trimmed = line.trim();
+        if (trimmed.toLowerCase() === `[${serviceId}]`) {
+          sectionFound = true;
+          return line;
+        }
+        if (sectionFound && trimmed.toLowerCase().startsWith('version=')) {
+          const currentVersion = trimmed.split('=')[1] || '';
+          if (!currentVersion) {
+            sectionFound = false; // Solo actualizamos si está vacío
+            return `version=${version}`;
+          }
+          sectionFound = false;
+        }
+        return line;
+      });
+      fs.writeFileSync(iniPath, newLines.join('\n'));
+    }
+  } catch (e) {
+    log(`Error actualizando app.ini: ${e.message}`, 'WARNING');
+  }
+}
+
+ipcMain.handle('uninstall-service', async (event, { serviceId, version, installPath }) => {
+  const destDir = path.join(defaultRoot, installPath, version);
+  log(`Desinstalando ${serviceId} v${version} de ${destDir}...`);
+  try {
+    if (fs.existsSync(destDir)) {
+      fs.rmSync(destDir, { recursive: true, force: true });
+      return { success: true };
+    }
+    return { success: false, error: 'Directory not found' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+async function checkForUpdates() {
+  const now = Date.now();
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  if (now - userConfig.lastUpdateCheck > oneDay) {
+    log('Buscando actualizaciones de servicios en segundo plano...');
+    try {
+      // Simulamos una petición a una URL remota
+      // const remoteUrl = 'https://api.github.com/repos/msoler75/WebServDev/contents/services.json';
+      
+      // Por ahora actualizamos el timestamp
+      userConfig.lastUpdateCheck = now;
+      saveUserConfig();
+      
+      log('Comprobación de servicios completada (vía background)');
+      
+      // Aquí iría la lógica de comparar el services.json remoto con el local
+      // y notificar al frontend si hay versiones nuevas.
+    } catch (error) {
+      log(`Error en auto-comprobación de servicios: ${error.message}`, 'ERROR');
+    }
+  } else {
+    log('La comprobación de servicios ya se realizó hoy.');
+  }
+}
+
 async function createWindow() {
   log('Creating main window...');
-  // Iniciar servidor MCP para DevTools con el puerto detectado
-  console.log(`Using debug port for MCP: ${debugPort}`);
+  
+  // Comprobar actualizaciones en background sin bloquear
+  checkForUpdates();
   
   mainWindow = new BrowserWindow({
     width: 1200,

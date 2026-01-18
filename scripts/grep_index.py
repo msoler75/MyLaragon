@@ -1,5 +1,5 @@
 import os
-p = r'd:\projects\MyLaragon\neutralino\.tmp\inspected_resources\extracted_index.html'
+p = r'd:\projects\WebServDev\neutralino\.tmp\inspected_resources\extracted_index.html'
 if not os.path.exists(p):
     print('No file',p)
     raise SystemExit(1)

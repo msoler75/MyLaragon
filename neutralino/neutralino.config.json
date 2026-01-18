@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
-  "applicationId": "com.msoler75.mylaragon",
-  "name": "MyLaragon",
+  "applicationId": "com.webservdev.app",
+  "name": "WebServDev",
   "version": "1.0.0",
   "defaultMode": "window",
   "port": 0,
@@ -23,7 +23,7 @@
   "globalVariables": {},
   "modes": {
     "window": {
-      "title": "MyLaragon",
+      "title": "WebServDev",
       "width": 1200,
       "height": 800,
       "minWidth": 800,
@@ -41,7 +41,7 @@
     }
   },
   "cli": {
-    "binaryName": "MyLaragon",
+    "binaryName": "WebServDev",
     "resourcesPath": "./www/",
     "extensionsPath": "./extensions/",
     "clientLibrary": "./www/neutralino.js",

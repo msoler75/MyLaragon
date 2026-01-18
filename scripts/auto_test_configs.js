@@ -13,7 +13,7 @@ const exec = promisify(execCb);
 const root = path.resolve(path.join('.', '..'));
 const projectRoot = path.resolve('.');
 const neutralinoDir = path.join(projectRoot, 'neutralino');
-const distDir = path.join(neutralinoDir, 'dist', 'MyLaragon');
+const distDir = path.join(neutralinoDir, 'dist', 'WebServDev');
 const configPath = path.join(neutralinoDir, 'neutralino.config.json');
 const backupPath = path.join(neutralinoDir, 'neutralino.config.autotest.backup.json');
 const reportPath = path.join(projectRoot, 'PRUEBAS_REALIZADAS.md');
@@ -89,7 +89,7 @@ async function copyRecursive(src, dest){
 function fileExists(p){ try{ return fs.existsSync(p); }catch(e){return false;} }
 
 async function startExe(){
-  const exe = path.join(distDir, 'MyLaragon-win_x64.exe');
+  const exe = path.join(distDir, 'WebServDev-win_x64.exe');
   if (!fileExists(exe)) throw new Error('exe not found: ' + exe);
   const proc = spawn(exe, [], { detached: false, stdio: 'ignore' });
   return proc;
@@ -98,7 +98,7 @@ async function startExe(){
 async function killExe(proc){
   try{ proc.kill(); }catch(e){ /* ignore */ }
   // additionally try taskkill by name
-  try{ await exec('taskkill /IM MyLaragon-win_x64.exe /F'); }catch(e){}
+  try{ await exec('taskkill /IM WebServDev-win_x64.exe /F'); }catch(e){}
 }
 
 function readLogTail(lines=200){
@@ -183,7 +183,7 @@ async function runOne(test){
   ['app-log.txt','bootstrap-log.txt','bootstrap-error.txt'].forEach(f=>{ try{ const p=path.join(distDir,f); if (fileExists(p)) fs.unlinkSync(p); }catch(e){} });
 
   // Kill existing instances to ensure a clean start
-  try{ await exec('taskkill /IM MyLaragon-win_x64.exe /F'); }catch(e){}
+  try{ await exec('taskkill /IM WebServDev-win_x64.exe /F'); }catch(e){}
   // start exe
   entry.notes.push('Starting exe');
   let proc;

@@ -1,6 +1,6 @@
 # Informe de Diagnóstico de Acceso a Disco
 
-Este informe analiza por qué la aplicación MyLaragon no encontraba los ejecutables de Laragon y verifica la estructura real del disco.
+Este informe analiza por qué la aplicación WebServDev no encontraba los ejecutables de Laragon y verifica la estructura real del disco.
 
 ## Análisis del Error
 El log del usuario mostró el siguiente error crítico:
@@ -39,7 +39,7 @@ Mediante pruebas directas en terminal, se han confirmado las siguientes rutas:
 
 ## Acciones Tomadas en el Código
 1. **Corrección de la API Nativa**: Se han actualizado las llamadas a `Neutralino.filesystem.readDirectory(path)` y `Neutralino.filesystem.exists(path)` para pasar strings directos.
-2. **Robustez en la Detección**: Se ha mejorado `getEnrichedServices` para que, una vez que `readDir` funcione, priorice los nombres reales de las carpetas encontrados en el disco sobre los valores estáticos del JSON.
+2. **Robustez en la Detección**: Se ha mejorado `getEnrichedServices` para que, una vez que `readDir` funcione, priorice los nombr2es reales de las carpetas encontrados en el disco sobre los valores estáticos del JSON.
 
 ---
-*Diagnóstico generado el 14 de enero de 2026*
+*Diagnóstico gene2rado el 14 de enero de 2026*

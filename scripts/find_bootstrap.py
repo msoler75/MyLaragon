@@ -1,5 +1,5 @@
 import re
-p='d:/projects/MyLaragon/neutralino/dist/MyLaragon/resources.neu'
+p='d:/projects/WebServDev/neutralino/dist/WebServDev/resources.neu'
 data=open(p,'rb').read()
 # search for manifest entries like "bootstrap.html":{...
 m=re.search(rb'"bootstrap\.html"\s*:\s*\{', data)

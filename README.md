@@ -1,31 +1,32 @@
-# MyLaragon (Companion App) 🚀
+# WebServDev 🚀
 
-**MyLaragon** es un controlador ligero y moderno diseñado como un **subset de herramientas** para complementar tu instalación existente de **Laragon**. 
-
-No es un reemplazo de Laragon, sino una interfaz alternativa enfocada en la velocidad y la estética para las tareas más cotidianas del desarrollo web. Utiliza tu configuración actual de `laragon.ini` para ofrecer un control rápido y visual.
+**WebServDev** es un entorno de desarrollo moderno, visual y ampliable, diseñado como una herramienta independiente que ofrece una experiencia premium para la gestión de servidores locales.
 
 ![](./sample.png)
 
 ## 🎯 Propósito
 
-Esta aplicación nace para usuarios que ya tienen Laragon configurado y buscan:
-- Un **Dashboard visual** y moderno para el control de servicios.
-- Acceso rápido a las **funciones básicas** sin navegar por menús complejos.
-- Soporte **multi-idioma** nativo y extensible.
-- Una experiencia de usuario minimalista y fluida.
+Este proyecto ofrece una plataforma completa de desarrollo con los siguientes objetivos:
+- **Independencia Total**: Gestión propia de binarios y servicios sin dependencias externas.
+- **Gestión Remota y Auto-actualizable**: Instalación de servicios (Apache, MySQL, PHP, etc.) desde la nube. La aplicación comprueba diariamente en segundo plano si existen nuevas versiones o paquetes disponibles para mantener tu entorno siempre al día.
+- **Estructura Organizada**: Distribución de carpetas lógica y profesional (`/bin`, `/www`, `/etc`, etc.).
+- **Interfaz Moderna**: Un dashboard visual interactivo diseñado para el desarrollo web de alto nivel.
+- **Extensibilidad**: Sistema abierto para añadir nuevos servicios y herramientas personalizadas.
 
 ## ✨ Características Principales
 
-- ⚡ **Control de Servicios**: Inicia y detén Apache, MySQL, Nginx, Redis, Mailpit y MongoDB confiando en los binarios de tu Laragon.
-- 🌍 **Multi-idioma**: Soporte para Español, Inglés, Alemán (extensible mediante JSON).
-- 📊 **Estado en Tiempo Real**: Visualización inmediata de puertos y procesos en ejecución.
-- 🛠️ **Acceso Directo**: Botones para Terminal, Editor de Hosts, Variables de Entorno y carpetas de proyecto.
-- ⚙️ **Configuración**: Define tu editor de código preferido y la ruta de Laragon una sola vez.
+- ⚡ **Control Total**: Instala, desinstala, inicia y detén servicios con un solo clic.
+- 🌍 **Marketplace de Versiones**: Descarga versiones específicas de PHP, MySQL, Nginx, etc.
+- 🔄 **Actualizaciones en Background**: Detección automática de nuevos paquetes cada 24 horas.
+- 📂 **Estructura Profesional**: `/bin`, `/www`, `/etc`, `/data`, `/logs` perfectamente organizados.
+- 🌍 **Multi-idioma**: Soporte para Español, Inglés, Alemán y más.
+- 📊 **Monitoreo**: Estado de puertos y procesos en tiempo real.
+- 🛠️ **Herramientas**: Terminal, Editor de Hosts, y gestión de proyectos integrados.
 
 ## 🚀 Requisitos de Uso
 
 1. **Tener Laragon instalado** en tu sistema Windows.
-2. Configurar la ruta de instalación de Laragon en el apartado de **Ajustes** dentro de MyLaragon al abrirlo por primera vez.
+2. Configurar la ruta de instalación de Laragon en el apartado de **Ajustes** dentro de WebServDev al abrirlo por primera vez.
 
 ## 🛠️ Desarrollo
 
@@ -61,7 +62,7 @@ La aplicación soporta Neutralino como runtime más ligero que Electron. El proy
 
 ### Configurar la ruta de Laragon
 
-La aplicación espera que introduzcas la ruta de instalación de Laragon en la interfaz de Ajustes la primera vez que la abras. También puedes preconfigurarla en `localStorage` usando la clave `mylaragon-config`. Ejemplo de contenido JSON:
+La aplicación espera que introduzcas la ruta de instalación de Laragon en la interfaz de Ajustes la primera vez que la abras. También puedes preconfigurarla en `localStorage` usando la clave `WebServDev-config`. Ejemplo de contenido JSON:
 
 ```json
 {

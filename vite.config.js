@@ -16,13 +16,21 @@ export default defineConfig({
       name: 'copy-services-json',
       apply: 'build',
       writeBundle() {
-        // Copiar services.json a neutralino/www después del build
-        const source = path.resolve('public/services.json');
+        // Copiar services.json desde LA RAÍZ a neutralino/www después del build
+        // El de la raíz es el que tiene el formato correcto { "services": [...] }
+        const source = path.resolve('services.json');
         const target = path.resolve('neutralino/www/services.json');
         try {
           if (fs.existsSync(source)) {
             fs.copyFileSync(source, target);
-            console.log('✓ services.json copiado a neutralino/www/');
+            console.log('✓ services.json (ROOT) copiado a neutralino/www/');
+          } else {
+            // Fallback al de public si el de raíz no existe
+            const publicSource = path.resolve('public/services.json');
+            if (fs.existsSync(publicSource)) {
+              fs.copyFileSync(publicSource, target);
+              console.log('✓ services.json (PUBLIC) copiado a neutralino/www/');
+            }
           }
         } catch (e) {
           console.warn('⚠️ Error copiando services.json:', e.message);
@@ -47,7 +55,7 @@ export default defineConfig({
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="./vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MyLaragon</title>
+    <title>WebServDev</title>
     <!-- Neutralino SDK and Shim - MUST load FIRST -->
     <script src="/neutralino.js"><\/script>
     <script>
@@ -181,7 +189,8 @@ export default defineConfig({
                 }
                 
                 console.log('[EXEC API] Ejecutando:', command);
-                const { stdout, stderr } = await execAsync(command, { timeout: 5000 });
+                // Aumentamos el timeout a 15 minutos para permitir descargas largas de servicios
+                const { stdout, stderr } = await execAsync(command, { timeout: 900000 });
                 console.log('[EXEC API] Stdout:', stdout.slice(0, 200));
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ stdout, stderr, success: true }));

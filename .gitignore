@@ -13,6 +13,11 @@ dist_electron
 dist-ssr
 neutralino/www/*
 !neutralino/www/
+neutralino/bin/
+neutralino/.tmp/
+bin/
+data/
+tmp/
 *.local
 
 # Laragon / App Config

@@ -1,4 +1,4 @@
-# Guía: Ejecutar MyLaragon con Neutralino
+# Guía: Ejecutar WebServDev con Neutralino
 
 Este proyecto ahora está completamente configurado para funcionar con **Neutralino**, un framework ligero para aplicaciones de escritorio.
 
@@ -51,7 +51,7 @@ Esto genera el instalador Windows en `dist_electron/` usando Neutralino.
 ## 🔧 Estructura de Carpetas
 
 ```
-MyLaragon/
+WebServDev/
 ├── src/                      # Código fuente React (componentes, estilos)
 ├── public/                   # Archivos públicos estáticos
 │   └── neutralino-shim.js   # Puente entre React y Neutralino
@@ -80,7 +80,7 @@ MyLaragon/
 - **Hot-reload**: Durante `npm run dev`, los cambios en `src/` se reflejan automáticamente
 - **Logs**: Revisa la consola del navegador (F12) para errores de JavaScript
 - **Comandos Windows**: Los comandos de inicio/parada de servicios se ejecutan via `Neutralino.os.execCommand()`
-- **Configuración**: Se guarda en `localStorage` con la clave `mylaragon-config`
+- **Configuración**: Se guarda en `localStorage` con la clave `WebServDev-config`
 
 ## 🐛 Solución de Problemas
 

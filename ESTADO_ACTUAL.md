@@ -1,4 +1,4 @@
-# MyLaragon - Guía de Desarrollo con Neutralino
+# WebServDev - Guía de Desarrollo con Neutralino
 
 ## ✅ REVISIÓN COMPLETADA
 
@@ -6,7 +6,7 @@ He revisado y corregido toda la configuración del proyecto. Aquí está el esta
 
 ### 📁 Estructura de Archivos
 ```
-MyLaragon/
+WebServDev/
 ├── src/
 │   ├── App.jsx          ← TU APLICACIÓN PRINCIPAL
 │   ├── main.jsx         ← Entry point de React
@@ -76,7 +76,7 @@ cd neutralino
 ```
 
 ¿La ventana que se abrió mostró:
-- ✅ **Tu aplicación MyLaragon** (con el panel de servicios de Laragon)
+- ✅ **Tu aplicación WebServDev** (con el panel de servicios de Laragon)
 - ❌ **La demo de Neutralino** (página genérica con ejemplos)
 - ❌ **Pantalla en blanco**
 
@@ -97,3 +97,18 @@ npm run build        # Compilar para producción
 npm run dist         # Compilar y crear ejecutable distribuible
 npm run vite         # Solo servidor Vite (sin Neutralino)
 ```
+
+---
+
+## 🚀 MEJORAS RECIENTES (2026-01-14)
+
+### Gestor de Componentes Evolucionado
+Se ha transformado el instalador básico en un gestor de paquetes robusto y profesional:
+
+1.  **Paralelismo Real:** Ahora puedes instalar PHP, Apache y MySQL al mismo tiempo. El estado de la UI se gestiona de forma granular por cada versión.
+2.  **Sistema de Cancelación:** Si te equivocas o la descarga va lenta, puedes cancelar cualquier instalación activa. El sistema matará el proceso de PowerShell y limpiará los archivos `.zip` temporales automáticamente.
+3.  **Desinstalación Integrada:** Acceso directo para borrar versiones instaladas desde la misma interfaz, con diálogos de confirmación de seguridad.
+4.  **Repositorio Verificado:** Se han actualizado todas las URLs en `services.json` con las versiones estables más modernas (PHP 8.3.29, Apache 2.4.66, etc.).
+5.  **Logging Persistente:** Se ha añadido una capa de auditoría que guarda cada paso de la instalación/desinstalación en el archivo `webservdev.log` en la raíz del proyecto.
+
+*Ultima actualización: GitHub Copilot (Gemini 3 Flash)*

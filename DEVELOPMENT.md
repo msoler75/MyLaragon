@@ -1,4 +1,4 @@
-# Guía de Desarrollo - MyLaragon
+# Guía de Desarrollo - WebServDev
 
 ## Configuración del Entorno
 
@@ -32,7 +32,7 @@ npm run electron
 npm run dist
 ```
 
-Genera ejecutable en `neutralino/dist/MyLaragon/MyLaragon-win_x64.exe`
+Genera ejecutable en `neutralino/dist/WebServDev/WebServDev-win_x64.exe`
 
 ## Configuración de Neutralino - Guía Definitiva (Actualizado 2026-01-14)
 
@@ -234,4 +234,4 @@ A continuación se documentan las pruebas que llevamos a cabo y **por qué falla
 
 Si quieres, puedo añadir también un checklist automatizable (script) que ejecute estas pruebas y deje un archivo `PRUEBAS_FALLIDAS.md` con timestamps cada vez que una prueba falle, para mantener el historial en el repo. ¿Lo añado? 
 </content>
-<parameter name="filePath">d:\projects\MyLaragon\DEVELOPMENT.md
+<parameter name="filePath">d:\projects\WebServDev\DEVELOPMENT.md

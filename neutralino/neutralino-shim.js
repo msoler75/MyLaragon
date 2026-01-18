@@ -3,7 +3,17 @@
   if(typeof Neutralino !== 'undefined') {
     Neutralino.init();
   }
-  const defaultConfig = { laragonPath: 'C:\\laragon', projectsPath: 'C:\\laragon\\www', editor: 'notepad', autoStart: false, language: 'es', theme: 'system' };
+  
+  // Detectar raíz real en Neutralino (NL_PATH es el directorio del binary)
+  const neutralinoRoot = window.NL_PATH || '.';
+  const defaultConfig = { 
+    appPath: neutralinoRoot, 
+    projectsPath: neutralinoRoot + '\\www', 
+    editor: 'notepad', 
+    autoStart: false, 
+    language: 'es', 
+    theme: 'system' 
+  };
 
   async function fileExists(path){
     try{
@@ -392,7 +402,7 @@
     getServices: async (hiddenServices)=>{
       console.log('[SHIM] getServices called');
       try{
-        const cfgRaw = localStorage.getItem('mylaragon-config');
+        const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
         const laragonPath = cfg.laragonPath || defaultConfig.laragonPath;
 
@@ -490,7 +500,7 @@
     startService: async (serviceName)=>{
       console.log('[SHIM] startService llamado para:', serviceName);
       try{
-        const cfgRaw = localStorage.getItem('mylaragon-config');
+        const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
         const laragonPath = cfg.laragonPath || defaultConfig.laragonPath;
         console.log('[SHIM] Laragon path:', laragonPath);
@@ -637,7 +647,7 @@
     },
     stopService: async (serviceName)=>{
       try{
-        const cfgRaw = localStorage.getItem('mylaragon-config');
+        const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
         const laragonPath = cfg.laragonPath || defaultConfig.laragonPath;
         
@@ -756,12 +766,15 @@
     },
     getConfig: async ()=>{
       try{
-        const raw = localStorage.getItem('mylaragon-config');
-        return raw ? JSON.parse(raw) : defaultConfig;
+        const raw = localStorage.getItem('WebServDev-config');
+        const cfg = raw ? JSON.parse(raw) : defaultConfig;
+        // Forzar siempre el appPath actual para evitar que "C:\App" se quede pegado
+        cfg.appPath = neutralinoRoot;
+        return cfg;
       }catch(e){ return defaultConfig; }
     },
     setConfig: async (cfg)=>{
-      try{ localStorage.setItem('mylaragon-config', JSON.stringify(cfg)); return true; }catch(e){return false}
+      try{ localStorage.setItem('WebServDev-config', JSON.stringify(cfg)); return true; }catch(e){return false}
     },
     getLogs: async ()=>{
       try{
@@ -797,6 +810,64 @@
       // no native stream; return a remover function
       window.__neutralino_log_cb = cb;
       return ()=>{ window.__neutralino_log_cb = null };
+    },
+    openAppFolder: async () => {
+      try {
+        const root = window.NL_PATH || '.';
+        await execCommand(`explorer "${root}"`);
+      } catch(e) { console.error(e); }
+    },
+    openDocumentRoot: async () => {
+      try {
+        const cfgRaw = localStorage.getItem('myApp-config');
+        const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
+        await execCommand(`explorer "${cfg.projectsPath || defaultConfig.projectsPath}"`);
+      } catch(e) { console.error(e); }
+    },
+    openDevTools: async () => {
+      console.warn('[SHIM] openDevTools no es soportado nativamente en Neutralino desde JS para el usuario.');
+    },
+    getRemoteServices: async () => {
+      try {
+        const res = await fetch('/services.json');
+        if (res.ok) return await res.json();
+      } catch(e) { console.error(e); }
+      return { services: [] };
+    },
+    installService: async (data) => {
+      console.error('[SHIM] installService no implementado en shim de Neutralino aún. Use la versión Electron para instalaciones.');
+      return { success: false, error: 'Operación no soportada en este entorno.' };
+    },
+    updateServiceVersion: async (type, version) => {
+      try {
+        const cfgRaw = localStorage.getItem('myApp-config');
+        const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
+        if (!cfg.versions) cfg.versions = {};
+        cfg.versions[type] = version;
+        localStorage.setItem('myApp-config', JSON.stringify(cfg));
+        return { success: true };
+      } catch(e) { return { success: false, message: e.message }; }
+    },
+    openConfigFile: async ({ path: filePath, type = 'file' }) => {
+      try {
+        if (type === 'folder') {
+          await execCommand(`explorer "${filePath}"`);
+        } else {
+          await execCommand(`notepad "${filePath}"`);
+        }
+      } catch(e) { console.error(e); }
+    },
+    openTerminal: async () => {
+      try {
+        const root = window.NL_PATH || '.';
+        await execCommand(`cmd.exe /K "cd /d ${root}"`);
+      } catch(e) { console.error(e); }
+    },
+    openHosts: async () => {
+      await execCommand('powershell -Command "Start-Process notepad C:\\Windows\\System32\\drivers\\etc\\hosts -Verb RunAs"');
+    },
+    openEnvVars: async () => {
+      await execCommand('control sysdm.cpl,,3');
     }
   };
 

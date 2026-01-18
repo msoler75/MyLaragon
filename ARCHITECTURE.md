@@ -1,8 +1,8 @@
-# Arquitectura del Proyecto MyLaragon
+# Arquitectura del Proyecto WebServDev
 
 ## Visión General
 
-MyLaragon es una aplicación de escritorio para Windows 11 que proporciona un panel de control avanzado para Laragon, utilizando tecnologías modernas como React, Tailwind CSS 4 y Electron.
+WebServDev es una aplicación de escritorio para Windows 11 que proporciona un panel de control avanzado para Laragon, utilizando tecnologías modernas como React, Tailwind CSS 4 y Electron.
 
 ## Arquitectura de Capas
 
@@ -26,7 +26,7 @@ MyLaragon es una aplicación de escritorio para Windows 11 que proporciona un pa
 ## Estructura de Carpetas
 
 ```
-mylaragon/
+WebServDev/
 ├── electron/
 │   ├── main.js          # Proceso principal de Electron
 │   └── preload.js       # Puente IPC seguro
@@ -56,4 +56,4 @@ mylaragon/
 - **Módulos de Servicios**: Fácil añadir nuevos servicios
 - **Comandos Personalizados**: Configurables por proyecto
 - **Plugins**: Arquitectura preparada para extensiones</content>
-<parameter name="filePath">d:\projects\MyLaragon\ARCHITECTURE.md
+<parameter name="filePath">d:\projects\WebServDev\ARCHITECTURE.md

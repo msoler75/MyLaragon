@@ -46,8 +46,43 @@ if (mode === 'build') {
   }
 } else if (mode === 'restore') {
   console.log('✓ Restaurando configuración original...');
-  const distFolder = path.join(__dirname, '../neutralino/dist/MyLaragon');
+  const distFolder = path.join(__dirname, '../neutralino/dist/WebServDev');
+  const rootDir = path.join(__dirname, '..');
   
+  // Copiar archivos esenciales al dist para que sea portable y funcional
+  if (fs.existsSync(distFolder)) {
+    console.log('✓ Copiando archivos esenciales al dist...');
+    const filesToCopy = ['services.json', 'app.ini'];
+    
+    // Crear carpetas necesarias
+    ['bin', 'usr', 'www'].forEach(dir => {
+      const dirPath = path.join(distFolder, dir);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+        console.log(`  - Carpeta ${dir} creada.`);
+      }
+    });
+
+    filesToCopy.forEach(file => {
+      const src = path.join(rootDir, file);
+      const dest = path.join(distFolder, file);
+      if (fs.existsSync(src)) {
+        try {
+          fs.copyFileSync(src, dest);
+          console.log(`  - ${file} copiado a la raíz.`);
+          
+          // Si es app.ini, copiar también a usr/
+          if (file === 'app.ini') {
+            fs.copyFileSync(src, path.join(distFolder, 'usr', 'app.ini'));
+            console.log('  - app.ini copiado a usr/.');
+          }
+        } catch (e) {
+          console.warn(`  - Error al copiar ${file}: ${e.message}`);
+        }
+      }
+    });
+  }
+
   if (fs.existsSync(backupPath)) {
     try {
       const backup = fs.readFileSync(backupPath, 'utf-8');

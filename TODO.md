@@ -1,4 +1,4 @@
-# TODO - MyLaragon Project
+# TODO - WebServDev Project
 
 ## Fase 1: Configuración Inicial del Proyecto
 - [x] Elegir y configurar el stack base: React + JavaScript + Vite + Tailwind CSS 4 + Electron
@@ -24,7 +24,7 @@
 - [x] Mostrar estado de servicios en UI
 - [x] Implementar detección real de estado de servicios (puertos, procesos)
 - [x] Iniciar todo / Detener todo
-- [x] Detectar servicios disponibles en C:\laragon\bin
+- [x] Detectar servicios disponibles en C:\App\bin
 - [x] Iniciar/detener procesos reales de Apache, MySQL, etc.
 - [x] Actualización en tiempo real del estado (optimizado a 7s)
 - [x] Diseño tipo XAMPP premium para pantalla principal
@@ -43,7 +43,7 @@
 
 ## Fase 6: Configuraciones
 - [x] Sistema de configuración básico (por defecto)
-- [ ] Leer/editar archivos de config de Laragon (php.ini, my.ini, etc.)
+- [ ] Leer/editar archivos de config de App (php.ini, my.ini, etc.)
 - [ ] Configurar rutas personalizables desde UI
 
 ## Fase 7: Funcionalidades Avanzadas
@@ -60,4 +60,4 @@
 - [x] Crear ARCHITECTURE.md con diagrama de módulos y capas
 - [x] Crear DEVELOPMENT.md con guías de desarrollo y contribución
 - [ ] Actualizar README.md con instrucciones de instalación y uso</content>
-<parameter name="filePath">d:\projects\MyLaragon\TODO.md
+<parameter name="filePath">d:\projects\MyApp\TODO.md
