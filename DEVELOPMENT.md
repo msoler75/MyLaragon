@@ -99,38 +99,12 @@ resources.neu (empaquetado)
 
 ### Scripts de Build Relevantes
 
-**`scripts/build-config.js`** - Cambia configuración según modo:
-```javascript
-if (mode === 'build') {
-  config.enableServer = false;
-  config.url = "www/index.html";
-  config.documentRoot = "./www/";
-  // ... resto de configuración
-}
-```
+- `scripts/build-config.js`: Prepara el `neutralino.config.json` para producción.
+- `scripts/init_folders.js`: Crea la estructura de carpetas necesaria.
 
-**`vite.config.js`** - Plugin personalizado:
-- Copia `services.json` a `www/`
-- Copia assets compilados a `www/assets/`
-- Asegura estructura correcta en bundle
+## Filosofía de Desarrollo y UX
 
-### Lecciones Aprendidas
-
-1. **Neutralino.js requiere `enableServer: false` para confiabilidad**
-   - El servidor interno tiene bugs no documentados
-   - Más seguro cargar desde el bundle empaquetado
-
-2. **Las rutas son tricky:**
-   - `url` es relativa a la raíz del bundle
-   - `documentRoot` es relativa al CWD de la app
-   - Ambas deben apuntar a la misma ubicación lógica
-
-3. **No usar fetch() para datos internos**
-   - Alternativas: fallback hardcodeado, módulos JS, índexDB
-
-4. **El inspector (`enableInspector`) debe deshabilitarse en producción**
-   - Seguridad y limpieza de interfaz
-   - Permite debugging durante desarrollo
+Para asegurar que la aplicación mantenga un estándar de calidad alto (XP de excelencia), consulta la **[Guía de Excelencia en UX](EXCELENCIA_UX.md)**. Todos los nuevos módulos de servicios o integraciones deben cumplir con los principios de sincronización en tiempo real y resiliencia de rutas allí descritos.
 
 ## Estructura del Código
 
@@ -233,5 +207,3 @@ A continuación se documentan las pruebas que llevamos a cabo y **por qué falla
 ---
 
 Si quieres, puedo añadir también un checklist automatizable (script) que ejecute estas pruebas y deje un archivo `PRUEBAS_FALLIDAS.md` con timestamps cada vez que una prueba falle, para mantener el historial en el repo. ¿Lo añado? 
-</content>
-<parameter name="filePath">d:\projects\WebServDev\DEVELOPMENT.md

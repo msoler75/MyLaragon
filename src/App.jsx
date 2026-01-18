@@ -200,6 +200,14 @@ function App() {
         
         // Identificar tipo para el delay de estabilización
         const service = services.find(s => s.name === serviceName);
+
+        // Si el servicio no está instalado, redirigir a la vista de instalación
+        if (service && service.isInstalled === false) {
+          window.dispatchEvent(new CustomEvent('change-tab', { detail: 'install' }));
+          setProcessingServices(prev => prev.filter(s => s !== serviceName));
+          return;
+        }
+
         const type = service?.type?.toLowerCase() || '';
         const isHeavy = ['mysql', 'mariadb', 'mongodb', 'postgresql'].includes(type);
         
@@ -302,7 +310,7 @@ function App() {
                 <Icon size={18} />
                 <span className="font-bold uppercase tracking-wider text-xs flex-1 text-left">{item.label}</span>
                 {item.badge > 0 && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-app-danger px-1 text-[9px] font-black text-white shadow-sm ring-2 ring-app-surface animate-in zoom-in duration-300">
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 flex h-4 min-w-4 items-center justify-center rounded-full bg-app-danger px-1 text-[9px] font-black text-white shadow-sm ring-2 ring-app-surface animate-in zoom-in duration-300">
                     {item.badge > 99 ? '99+' : item.badge}
                   </span>
                 )}

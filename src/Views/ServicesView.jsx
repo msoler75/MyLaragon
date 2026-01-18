@@ -155,7 +155,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
               {menuOpen === service.name && (
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => { setMenuOpen(null); setActiveSubMenu(null); }}></div>
-                  <div className={`absolute top-10 right-3 ${activeSubMenu ? 'w-80' : 'w-48'} bg-app-surface border border-app-border rounded-xl shadow-2xl z-40 py-1.5 animate-in fade-in zoom-in-95 duration-75 origin-top-right overflow-hidden transition-all duration-75`}>
+                  <div className={`absolute top-10 right-3 ${activeSubMenu ? 'w-80' : 'w-48'} bg-app-surface border border-app-border rounded-xl shadow-2xl z-40 py-1.5 animate-in fade-in zoom-in-95 origin-top-right overflow-hidden transition-all duration-75`}>
                     {!activeSubMenu ? (
                       <>
                         <div className="px-3 py-1 mb-1 border-b border-app-border">
@@ -266,8 +266,8 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                                 <span className="truncate">{v}</span>
                                 {service.phpVersion === v && <div className="w-1.5 h-1.5 rounded-full bg-app-primary"></div>}
                               </button>
-                            ))
-                          )}
+                            )))
+                          }
                         </div>
                       </div>
                     )}
@@ -288,19 +288,21 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                   {getServiceIcon(service.type)}
                 </div>
                 <div className="overflow-hidden flex-1">
-                  <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : isPortOccupied ? 'text-app-warning' : 'text-app-text'}`}>{service.name}</h3>
+                  <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : !service.isInstalled ? 'text-app-danger' : isPortOccupied ? 'text-app-warning' : 'text-app-text'}`}>{service.name}</h3>
                   <div className="flex items-center space-x-1.5">
                     <span className={`rounded-full transition-all duration-500 ${
                       isProcessing 
                         ? 'h-2 w-2 bg-app-primary animate-bounce' 
-                        : isRunning 
-                          ? 'h-2.5 w-2.5 bg-app-success animate-pulse shadow-[0_0_8px_var(--app-success)]' 
-                          : isPortOccupied
-                          ? 'h-2.5 w-2.5 bg-app-warning animate-pulse shadow-[0_0_8px_rgba(249,115,22,0.8)]'
-                          : 'h-2 w-2 bg-app-text-muted'
+                        : !service.isInstalled
+                          ? 'h-2 w-2 bg-app-danger animate-pulse'
+                          : isRunning 
+                            ? 'h-2.5 w-2.5 bg-app-success animate-pulse shadow-[0_0_8px_var(--app-success)]' 
+                            : isPortOccupied
+                            ? 'h-2.5 w-2.5 bg-app-warning animate-pulse shadow-[0_0_8px_rgba(249,115,22,0.8)]'
+                            : 'h-2 w-2 bg-app-text-muted'
                     }`}></span>
-                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isRunning ? 'text-app-success/80' : isPortOccupied ? 'text-app-warning/80' : 'text-app-text-muted'}`}>
-                      {isProcessing ? t.processing : isRunning ? t.online : isPortOccupied ? (t.portOccupied || 'PUERTO OCUPADO') : t.offline}
+                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isRunning ? 'text-app-success/80' : !service.isInstalled ? 'text-app-danger/80' : isPortOccupied ? 'text-app-warning/80' : 'text-app-text-muted'}`}>
+                      {isProcessing ? t.processing : !service.isInstalled ? (t.notInstalled || 'NO INSTALADO') : isRunning ? t.online : isPortOccupied ? (t.portOccupied || 'PUERTO OCUPADO') : t.offline}
                     </span>
                   </div>
                 </div>
@@ -412,17 +414,27 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
               
               <button
                 disabled={isProcessing}
-                onClick={() => service.status === 'running' ? onStop(service.name) : onStart(service.name)}
+                onClick={() => {
+                  if (!service.isInstalled) {
+                    window.dispatchEvent(new CustomEvent('change-tab', { detail: 'install' }));
+                    return;
+                  }
+                  service.status === 'running' ? onStop(service.name) : onStart(service.name);
+                }}
                 className={`w-full py-2 rounded-xl font-black flex items-center justify-center space-x-2 transition-all duration-300 transform active:scale-95 border-b-2 mt-auto uppercase tracking-widest text-xs ${
                   isProcessing
                     ? 'bg-app-bg text-app-text-muted border-app-border cursor-not-allowed translate-y-1 border-b-0 opacity-60'
-                    : service.status === 'running'
-                      ? 'bg-app-danger/10 text-app-danger border-app-danger/30 hover:bg-app-danger hover:text-white hover:border-app-danger'
-                      : 'bg-app-primary text-white border-app-primary/50 hover:bg-app-primary/90 shadow-lg shadow-app-primary/10'
+                    : !service.isInstalled
+                      ? 'bg-app-warning/10 text-app-warning border-app-warning/30 hover:bg-app-warning hover:text-white hover:border-app-warning'
+                      : service.status === 'running'
+                        ? 'bg-app-danger/10 text-app-danger border-app-danger/30 hover:bg-app-danger hover:text-white hover:border-app-danger'
+                        : 'bg-app-primary text-white border-app-primary/50 hover:bg-app-primary/90 shadow-lg shadow-app-primary/10'
                 }`}
               >
                 {isProcessing ? (
                   <><RefreshCw size={14} className="animate-spin" /><span>{t.wait}</span></>
+                ) : !service.isInstalled ? (
+                  <><Layers size={14} /><span>{t.install || 'INSTALAR'}</span></>
                 ) : service.status === 'running' ? (
                   <><Square size={14} fill="currentColor" /><span>{t.stop}</span></>
                 ) : (

@@ -13,6 +13,8 @@
   "processing": "Verarbeitung...",
   "wait": "Warten...",
   "ready": "Bereit",
+  "notInstalled": "Nicht installiert",
+  "install": "Installieren",
   "port": "Port",
   "syncing": "Synchronisierung...",
   "activeServices": "Aktiv",

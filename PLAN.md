@@ -19,14 +19,11 @@ Este plan detalla los pasos para transformar WebServDev en una aplicación total
 - [x] Pestaña de Marketplace para instalación de servicios.
 - [ ] Elegir nuevo nombre oficial y aplicar rebranding global.
 
-## 🖥️ Fase 3: UI/UX Premium (Dashboard)
-- [ ] Rediseñar el panel principal:
-  - Vista de "Servidores" con estados detallados.
-  - Botón de "Instalar nuevos servicios" que abra un "Marketplace" de versiones.
-  - Feedback visual de descargas en curso.
-- [ ] Mejorar la gestión de proyectos (`www`):
-  - Autodetección de frameworks (Laravel, WordPress, etc.).
-  - Acciones rápidas por proyecto.
+## 🌟 Excelencia en UX (XP)
+- [x] Implementar detección inteligente de binarios (Smart Path).
+- [x] Sincronización en tiempo real del estado de servicios.
+- [x] Botones de acción contextuales (Instalar vs Iniciar).
+- [ ] Implementar un sistema de notificaciones toast para errores de sistema.
 
 ## ⚙️ Fase 4: Automatización de Configuraciones
 - [ ] Generador de archivos de configuración dinámicos:

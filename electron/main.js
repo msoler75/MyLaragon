@@ -146,6 +146,52 @@ const execAsync = (command) => {
   });
 };
 
+const executableMapping = {
+  'apache': 'httpd.exe',
+  'nginx': 'nginx.exe',
+  'mysql': 'mysqld.exe',
+  'mariadb': 'mysqld.exe',
+  'redis': 'redis-server.exe',
+  'memcached': 'memcached.exe',
+  'mailpit': 'mailpit.exe',
+  'mongodb': 'mongod.exe',
+  'postgresql': 'postgres.exe'
+};
+
+/**
+ * Encuentra de forma inteligente la carpeta bin de un servicio,
+ * manejando carpetas anidadas tras extracciones ZIP (ej: Apache24/bin).
+ */
+function getServiceBinPath(type, version) {
+  if (!version) return null;
+  const exeName = executableMapping[type];
+  if (!exeName) return null;
+
+  const possiblePaths = [
+    path.join(userConfig.appPath, 'bin', type, version),
+    path.join(userConfig.appPath, 'bin', type === 'mysql' ? 'mariadb' : (type === 'mariadb' ? 'mysql' : type), version)
+  ];
+
+  for (const basePath of possiblePaths) {
+    if (!fs.existsSync(basePath)) continue;
+
+    // 1. Directo o en /bin
+    if (fs.existsSync(path.join(basePath, exeName))) return basePath;
+    if (fs.existsSync(path.join(basePath, 'bin', exeName))) return path.join(basePath, 'bin');
+
+    // 2. Buscar una carpeta adentro (ej: Apache24, mysql-8.0...)
+    try {
+      const subdirs = fs.readdirSync(basePath).filter(f => fs.statSync(path.join(basePath, f)).isDirectory());
+      for (const sub of subdirs) {
+        const subPath = path.join(basePath, sub);
+        if (fs.existsSync(path.join(subPath, exeName))) return subPath;
+        if (fs.existsSync(path.join(subPath, 'bin', exeName))) return path.join(subPath, 'bin');
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
 // Leer configuración de App
 function getAppConfig() {
   const possiblePaths = [
@@ -194,6 +240,10 @@ function detectServices() {
   const config = getAppConfig();
   const services = [];
 
+  const isServiceInstalled = (type, version) => {
+    return getServiceBinPath(type, version) !== null;
+  };
+
   const getAvailableVersions = (serviceType) => {
     const pathsToCheck = [serviceType];
     // Aliases comunes en App
@@ -225,13 +275,19 @@ function detectServices() {
   const apacheVersion = config.apache?.version || (availableApache.length > 0 ? availableApache[0] : undefined);
   
   if (apacheVersion) {
-    const apacheBase = path.join(userConfig.appPath, 'bin', 'apache', apacheVersion);
+    const binPath = getServiceBinPath('apache', apacheVersion);
+    const apacheBase = binPath ? (binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : binPath) : path.join(userConfig.appPath, 'bin', 'apache', apacheVersion);
+    
+    // Localizar php.ini correctamente si existe PHP
+    const phpBinPath = getServiceBinPath('php', phpVersion);
+    const phpBase = phpBinPath ? (phpBinPath.toLowerCase().endsWith('bin') ? path.dirname(phpBinPath) : phpBinPath) : (phpVersion ? path.join(userConfig.appPath, 'bin', 'php', phpVersion) : null);
+
     const documentRoot = config.apache?.documentroot || userConfig.projectsPath;
     const apacheConfigs = [
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
       { label: 'httpd.conf', path: path.join(apacheBase, 'conf', 'httpd.conf') },
       { label: 'httpd-vhosts.conf', path: path.join(apacheBase, 'conf', 'extra', 'httpd-vhosts.conf') },
-      { label: 'php.ini', path: phpVersion ? path.join(userConfig.appPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
+      { label: 'php.ini', path: phpBase ? path.join(phpBase, 'php.ini') : '' },
       { label: 'php_errors.log', path: path.join(userConfig.appPath, 'tmp', 'php_errors.log') }
     ].filter(c => c.path && (c.type === 'folder' || fs.existsSync(c.path)));
 
@@ -242,7 +298,8 @@ function detectServices() {
       phpVersion: phpVersion,
       configs: apacheConfigs,
       availableVersions: availableApache,
-      availablePhpVersions: availablePhp
+      availablePhpVersions: availablePhp,
+      isInstalled: isServiceInstalled('apache', apacheVersion)
     });
   }
 
@@ -251,11 +308,9 @@ function detectServices() {
   const mysqlVersion = config.mysql?.version || (availableMysql.length > 0 ? availableMysql[0] : undefined);
 
   if (mysqlVersion) {
-    // Buscar la ruta base real (puede estar en bin/mysql o bin/mariadb)
-    let mysqlBase = path.join(userConfig.appPath, 'bin', 'mysql', mysqlVersion);
-    if (!fs.existsSync(mysqlBase)) {
-      mysqlBase = path.join(userConfig.appPath, 'bin', 'mariadb', mysqlVersion);
-    }
+    // Buscar la ruta base real
+    const binPath = getServiceBinPath('mysql', mysqlVersion);
+    let mysqlBase = binPath ? (binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : binPath) : path.join(userConfig.appPath, 'bin', 'mysql', mysqlVersion);
 
     const mysqlConfigs = [
       { label: 'my.ini', path: path.join(mysqlBase, 'my.ini') },
@@ -325,7 +380,8 @@ function detectServices() {
       type: 'mysql', 
       version: mysqlVersion,
       configs: uniqueConfigs,
-      availableVersions: availableMysql
+      availableVersions: availableMysql,
+      isInstalled: binPath !== null
     });
   }
 
@@ -334,7 +390,9 @@ function detectServices() {
   const nginxVersion = config.nginx?.version || (availableNginx.length > 0 ? availableNginx[0] : undefined);
 
   if (nginxVersion) {
-    const nginxBase = path.join(userConfig.appPath, 'bin', 'nginx', nginxVersion);
+    const binPath = getServiceBinPath('nginx', nginxVersion);
+    const nginxBase = binPath ? (binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : binPath) : path.join(userConfig.appPath, 'bin', 'nginx', nginxVersion);
+    
     const documentRoot = config.apache?.documentroot || userConfig.projectsPath; 
     const nginxConfigs = [
       { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
@@ -349,19 +407,8 @@ function detectServices() {
       phpVersion: phpVersion,
       configs: nginxConfigs,
       availableVersions: availableNginx,
-      availablePhpVersions: availablePhp
-    });
-  }
-
-  // Detectar PostgreSQL
-  const availablePostgres = getAvailableVersions('postgresql');
-  const postgresVersion = config.postgresql?.version || (availablePostgres.length > 0 ? availablePostgres[0] : undefined);
-  if (postgresVersion) {
-    services.push({ 
-      name: 'PostgreSQL', 
-      type: 'postgresql', 
-      version: postgresVersion,
-      availableVersions: availablePostgres
+      availablePhpVersions: availablePhp,
+      isInstalled: isServiceInstalled('nginx', nginxVersion)
     });
   }
 
@@ -373,73 +420,63 @@ function detectServices() {
       name: 'Redis', 
       type: 'redis', 
       version: redisVersion,
-      availableVersions: availableRedis
+      availableVersions: availableRedis,
+      isInstalled: isServiceInstalled('redis', redisVersion)
     });
   }
-  if (config.memcached && config.memcached.version) {
+
+  // Detectar Memcached
+  const availableMemcached = getAvailableVersions('memcached');
+  const memcachedVersion = config.memcached?.version || (availableMemcached.length > 0 ? availableMemcached[0] : undefined);
+  if (memcachedVersion) {
     services.push({ 
       name: 'Memcached', 
       type: 'memcached', 
-      version: config.memcached.version,
-      availableVersions: getAvailableVersions('memcached')
+      version: memcachedVersion,
+      availableVersions: availableMemcached,
+      isInstalled: isServiceInstalled('memcached', memcachedVersion)
     });
   }
-  
-  // Mailpit detection
-  let mailpitVersion = config.mailpit?.version;
-  if (!mailpitVersion) {
-    const mailpitDir = path.join(userConfig.appPath, 'bin', 'mailpit');
-    if (fs.existsSync(mailpitDir)) {
-      const dirs = fs.readdirSync(mailpitDir).filter(f => {
-        const fullPath = path.join(mailpitDir, f);
-        return fs.statSync(fullPath).isDirectory() && fs.existsSync(path.join(fullPath, 'mailpit.exe'));
-      });
-      if (dirs.length > 0) mailpitVersion = dirs[0];
-    }
-  }
-  if (mailpitVersion) {
-    const mailpitBase = path.join(userConfig.appPath, 'bin', 'mailpit', mailpitVersion);
-    const mailpitConfigs = [
-      { label: 'mailpit.log', path: path.join(mailpitBase, 'mailpit.log') }
-    ];
 
+  // Detectar MailPit
+  const availableMailpit = getAvailableVersions('mailpit');
+  const mailpitVersion = config.mailpit?.version || (availableMailpit.length > 0 ? availableMailpit[0] : undefined);
+  if (mailpitVersion) {
     services.push({ 
       name: 'Mailpit', 
       type: 'mailpit', 
       version: mailpitVersion,
-      configs: mailpitConfigs,
-      availableVersions: getAvailableVersions('mailpit')
+      availableVersions: availableMailpit,
+      isInstalled: isServiceInstalled('mailpit', mailpitVersion)
     });
   }
 
-  // MongoDB detection
-  let mongodbVersion = config.mongodb?.version;
-  if (!mongodbVersion) {
-    const mongodbDir = path.join(userConfig.appPath, 'bin', 'mongodb');
-    if (fs.existsSync(mongodbDir)) {
-      const dirs = fs.readdirSync(mongodbDir).filter(f => {
-        const fullPath = path.join(mongodbDir, f);
-        return fs.statSync(fullPath).isDirectory() && 
-               (fs.existsSync(path.join(fullPath, 'mongod.exe')) || fs.existsSync(path.join(fullPath, 'bin', 'mongod.exe')));
-      });
-      if (dirs.length > 0) mongodbVersion = dirs[0];
-    }
-  }
+  // Detectar MongoDB
+  const availableMongodb = getAvailableVersions('mongodb');
+  const mongodbVersion = config.mongodb?.version || (availableMongodb.length > 0 ? availableMongodb[0] : undefined);
   if (mongodbVersion) {
-    const mongodbBase = path.join(userConfig.appPath, 'bin', 'mongodb', mongodbVersion);
-    const mongodbConfigs = [
-      { label: 'mongod.cfg', path: path.join(mongodbBase, 'bin', 'mongod.cfg') }
-    ].filter(c => fs.existsSync(c.path));
-
     services.push({ 
       name: 'MongoDB', 
       type: 'mongodb', 
       version: mongodbVersion,
-      configs: mongodbConfigs,
-      availableVersions: getAvailableVersions('mongodb')
+      availableVersions: availableMongodb,
+      isInstalled: isServiceInstalled('mongodb', mongodbVersion)
     });
   }
-  
+
+  // Detectar PostgreSQL
+  const availablePostgresql = getAvailableVersions('postgresql');
+  const postgresqlVersion = config.postgresql?.version || (availablePostgresql.length > 0 ? availablePostgresql[0] : undefined);
+  if (postgresqlVersion) {
+    services.push({ 
+      name: 'PostgreSQL', 
+      type: 'postgresql', 
+      version: postgresqlVersion,
+      availableVersions: availablePostgresql,
+      isInstalled: isServiceInstalled('postgresql', postgresqlVersion)
+    });
+  }
+
   return services;
 }
 
@@ -849,7 +886,11 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
     let portInUse = false;
     let port = null;
     let processName = '';
-    let expectedPath = '';
+    
+    // Localizar inteligentemente la ruta del ejecutable
+    const binPath = getServiceBinPath(service.type, service.version);
+    const exeName = executableMapping[service.type];
+    const fullExePath = binPath ? path.join(binPath, exeName) : null;
     
     switch (service.type) {
       case 'apache':
@@ -864,11 +905,6 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
       case 'mariadb':
         port = 3306;
         processName = 'mysqld.exe';
-        // Ruta esperada del ejecutable de App
-        expectedPath = path.join(userConfig.appPath, 'bin', 'mysql', service.version, 'bin', 'mysqld.exe');
-        if (!fs.existsSync(expectedPath)) {
-          expectedPath = path.join(userConfig.appPath, 'bin', 'mysql', service.version, 'mysqld.exe');
-        }
         break;
       case 'postgresql':
         port = 5432;
@@ -902,75 +938,60 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
     const portPid = portsMap[port.toString()];
     portInUse = !!portPid;
     
-    // Para MySQL/MariaDB, necesitamos verificar la ruta del proceso
-    if ((service.type === 'mysql' || service.type === 'mariadb') && expectedPath) {
-      // Si el puerto está en uso, verificamos si es nuestro proceso de App
-      if (portInUse && portPid) {
-        // Usamos wmic para obtener la ruta completa del ejecutable del proceso
-        return new Promise((resolve) => {
-          exec(`wmic process where processid=${portPid} get ExecutablePath /value`, (error, stdout) => {
-            if (error || !stdout) {
-              // Fallback: si no podemos obtener la ruta, asumir que no es nuestro proceso
+    if (fullExePath && portInUse && portPid) {
+      // Usamos wmic para obtener la ruta completa del ejecutable del proceso
+      return new Promise((resolve) => {
+        exec(`wmic process where processid=${portPid} get ExecutablePath /value`, (error, stdout) => {
+          if (error || !stdout) {
+            resolve({ 
+              status: 'port_occupied_by_other', 
+              port, 
+              details: `El puerto ${port} está en uso por otro proceso.`,
+              processRunning: false,
+              portInUse: true,
+              processName
+            });
+            return;
+          }
+          
+          const match = stdout.match(/ExecutablePath=(.+)/);
+          if (match) {
+            const actualPath = match[1].trim().toLowerCase().replace(/\\/g, '/');
+            const expectedPathLower = fullExePath.toLowerCase().replace(/\\/g, '/');
+            
+            if (actualPath.includes(expectedPathLower) || expectedPathLower.includes(actualPath)) {
               resolve({ 
-                status: 'port_occupied_by_other', 
+                status: 'running', 
                 port, 
-                details: `El puerto ${port} está en uso por otro MySQL (posiblemente XAMPP u otro instalador).`,
-                processRunning: false,
+                details: `Proceso ${processName} de App (v${service.version}) escuchando en puerto ${port}.`,
+                processRunning: true,
                 portInUse: true,
                 processName
               });
-              return;
-            }
-            
-            const match = stdout.match(/ExecutablePath=(.+)/);
-            if (match) {
-              const actualPath = match[1].trim().toLowerCase().replace(/\\/g, '/');
-              const expectedPathLower = expectedPath.toLowerCase().replace(/\\/g, '/');
-              
-              if (actualPath.includes(expectedPathLower)) {
-                resolve({ 
-                  status: 'running', 
-                  port, 
-                  details: `Proceso ${processName} de App (v${service.version}) escuchando en puerto ${port}.`,
-                  processRunning: true,
-                  portInUse: true,
-                  processName
-                });
-              } else {
-                resolve({ 
-                  status: 'port_occupied_by_other', 
-                  port, 
-                  details: `El puerto ${port} está en uso por otro MySQL: ${actualPath}`,
-                  processRunning: false,
-                  portInUse: true,
-                  processName
-                });
-              }
             } else {
               resolve({ 
                 status: 'port_occupied_by_other', 
                 port, 
-                details: `El puerto ${port} está en uso por otro proceso.`,
+                details: `El puerto ${port} está en uso por otro proceso: ${actualPath}`,
                 processRunning: false,
                 portInUse: true,
                 processName
               });
             }
-          });
+          } else {
+            resolve({ 
+              status: 'port_occupied_by_other', 
+              port, 
+              details: `El puerto ${port} está en uso por otro proceso.`,
+              processRunning: false,
+              portInUse: true,
+              processName
+            });
+          }
         });
-      } else {
-        return { 
-          status: 'stopped', 
-          port, 
-          details: `Servicio detenido.`,
-          processRunning: false,
-          portInUse: false,
-          processName
-        };
-      }
+      });
     }
     
-    // Para otros servicios, mantener la lógica original
     let status;
     let details = '';
     
@@ -980,9 +1001,7 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
         status = 'running';
         details = `Proceso ${processName} (PIDs: ${pids.join(',')}) escuchando en puerto ${port}.`;
       } else {
-        // Verificar si hay algún proceso corriendo aunque el PID no coincida
         if (processRunning) {
-          // Hay proceso corriendo pero el puerto lo usa otro PID - puede ser proceso padre/hijo
           status = 'running';
           details = `Proceso ${processName} activo (PIDs: ${pids.join(',')}) en puerto ${port} (PID puerto: ${portPid}).`;
         } else {
@@ -991,7 +1010,6 @@ async function getServiceStatus(service, portsMap = {}, processMap = {}) {
         }
       }
     } else if (processRunning) {
-      // Proceso corriendo pero puerto no detectado - puede estar iniciando
       status = 'running';
       details = `Proceso ${processName} activo (PIDs: ${pids.join(',')}) - puerto ${port} iniciando...`;
     } else {
@@ -1010,58 +1028,37 @@ async function startService(service) {
   log(`═══════════════════════════════════════════════════════════`, 'INFO');
   log(`Iniciando servicio: ${service.name} (${service.type} ${service.version})`, 'INFO');
   
-  // Asegurarnos de cerrar cualquier instancia previa del mismo tipo de proceso 
-  // para evitar conflictos de versión o puertos
   try {
-    const processToKill = {
-      'apache': 'httpd.exe',
-      'nginx': 'nginx.exe',
-      'mysql': 'mysqld.exe',
-      'mariadb': 'mysqld.exe',
-      'redis': 'redis-server.exe',
-      'memcached': 'memcached.exe',
-      'mailpit': 'mailpit.exe',
-      'mongodb': 'mongod.exe'
-    }[service.type];
+    const processToKill = executableMapping[service.type];
 
     if (processToKill) {
       log(`Limpiando procesos antiguos: ${processToKill}...`);
       await execAsync(`taskkill /F /IM ${processToKill} 2>NUL`).catch(() => {});
-      // Esperar un poco para que el sistema libere los recursos
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   } catch (e) {
     log(`Error en limpieza: ${e.message}`, 'WARNING');
   }
 
-  let binPath = path.join(userConfig.appPath, 'bin', service.type, service.version);
-  if (fs.existsSync(path.join(binPath, 'bin'))) {
-    binPath = path.join(binPath, 'bin');
-  }
-  
-  const executableMapping = {
-    'apache': 'httpd.exe',
-    'nginx': 'nginx.exe',
-    'mysql': 'mysqld.exe',
-    'mariadb': 'mysqld.exe',
-    'redis': 'redis-server.exe',
-    'memcached': 'memcached.exe',
-    'mailpit': 'mailpit.exe',
-    'mongodb': 'mongod.exe'
-  };
-
+  const binPath = getServiceBinPath(service.type, service.version);
   const exeName = executableMapping[service.type];
-  const fullExePath = path.join(binPath, exeName);
 
-  if (!fs.existsSync(fullExePath)) {
-    throw new Error(`No se encontró el ejecutable en: ${fullExePath}`);
+  if (!binPath) {
+    throw new Error(`No se encontró el ejecutable para ${service.name} (tipo: ${service.type}, v: ${service.version})`);
   }
 
+  const fullExePath = path.join(binPath, exeName);
   log(`Garantizando inicio de ${service.name} usando: ${fullExePath}`);
   
   switch (service.type) {
     case 'apache':
-      const confPath = path.join(userConfig.appPath, 'bin', service.type, service.version, 'conf', 'httpd.conf');
+      // Buscar el httpd.conf en la carpeta base del servicio (podría estar arriba del binPath)
+      let apacheRoot = path.dirname(binPath);
+      // Si el binPath no termina en bin, es que estamos en el root
+      if (!binPath.toLowerCase().endsWith('bin')) {
+        apacheRoot = binPath;
+      }
+      const confPath = path.join(apacheRoot, 'conf', 'httpd.conf');
       
       // Verificar que el archivo de configuración exista
       if (!fs.existsSync(confPath)) {
@@ -1168,13 +1165,8 @@ async function startService(service) {
       break;
     case 'mysql':
     case 'mariadb':
-      let baseDir = path.join(userConfig.appPath, 'bin', service.type, service.version);
-      // Ajuste si el binario está en la carpeta alternativa (mariadb vs mysql)
-      if (!fs.existsSync(baseDir)) {
-        const altType = service.type === 'mysql' ? 'mariadb' : 'mysql';
-        const altDir = path.join(userConfig.appPath, 'bin', altType, service.version);
-        if (fs.existsSync(altDir)) baseDir = altDir;
-      }
+      // Usar binPath detectado arriba y su raíz como baseDir
+      let baseDir = binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : binPath;
 
       // Detectar la carpeta de datos correcta (preferir versionada si existe)
       const rawVersion = service.version;
@@ -1924,6 +1916,7 @@ ipcMain.handle('uninstall-service', async (event, { serviceId, version, installP
 
 async function checkForUpdates() {
   const now = Date.now();
+
   const oneDay = 24 * 60 * 60 * 1000;
 
   if (now - userConfig.lastUpdateCheck > oneDay) {
