@@ -48,6 +48,7 @@ if (mode === 'build') {
   console.log('✓ Restaurando configuración original...');
   const distFolder = path.join(__dirname, '../neutralino/dist/WebServDev');
   const rootDir = path.join(__dirname, '..');
+  const neutralinoFolder = path.join(__dirname, '../neutralino');
   
   // Copiar archivos esenciales al dist para que sea portable y funcional
   if (fs.existsSync(distFolder)) {
@@ -81,6 +82,21 @@ if (mode === 'build') {
         }
       }
     });
+
+    // CRÍTICO: Copiar el ejecutable de Neutralino
+    console.log('✓ Copiando ejecutable Neutralino...');
+    const exeSrc = path.join(neutralinoFolder, 'neutralino-win_x64.exe');
+    const exeDest = path.join(distFolder, 'WebServDev.exe');
+    if (fs.existsSync(exeSrc)) {
+      try {
+        fs.copyFileSync(exeSrc, exeDest);
+        console.log('  - WebServDev.exe copiado al dist.');
+      } catch (e) {
+        console.error(`  ✗ Error copiando ejecutable: ${e.message}`);
+      }
+    } else {
+      console.error('  ✗ neutralino-win_x64.exe no encontrado en carpeta neutralino.');
+    }
   }
 
   if (fs.existsSync(backupPath)) {

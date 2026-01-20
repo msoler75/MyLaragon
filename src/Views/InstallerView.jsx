@@ -138,13 +138,13 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
                 const taskId = `${service.id}-${v.version}`;
                 const taskStatus = activeTasks[taskId];
                 const isInstalled = services.some(s => {
-                  const typeMatch = s.type?.toLowerCase() === service.id.toLowerCase() || 
+                  const sType = (s.type || s.id || '').toLowerCase();
+                  const typeMatch = sType === service.id.toLowerCase() || 
                                    s.name?.toLowerCase() === service.id.toLowerCase();
-                  if (!typeMatch) return false;
                   
-                  const versions = s.availableVersions || [];
-                  const phpVersions = s.availablePhpVersions || [];
-                  return versions.includes(v.version) || phpVersions.includes(v.version);
+                  // Verificar si esta versión específica está en la lista de versiones instaladas detectadas
+                  const versionsDetected = s.availableVersions || s.availablePhpVersions || [];
+                  return typeMatch && versionsDetected.includes(v.version);
                 });
 
                 return (

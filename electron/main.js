@@ -5,6 +5,7 @@ import { exec, spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import https from 'https';
+import { installFromZip } from './service-installer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -299,7 +300,9 @@ function detectServices() {
       configs: apacheConfigs,
       availableVersions: availableApache,
       availablePhpVersions: availablePhp,
-      isInstalled: isServiceInstalled('apache', apacheVersion)
+      isInstalled: binPath !== null,
+      requiresPhp: true,
+      dependenciesReady: binPath !== null && !!phpBinPath,
     });
   }
 
@@ -416,12 +419,15 @@ function detectServices() {
   const availableRedis = getAvailableVersions('redis');
   const redisVersion = config.redis?.version || (availableRedis.length > 0 ? availableRedis[0] : undefined);
   if (redisVersion) {
+    const binPath = getServiceBinPath('redis', redisVersion);
     services.push({ 
       name: 'Redis', 
       type: 'redis', 
       version: redisVersion,
       availableVersions: availableRedis,
-      isInstalled: isServiceInstalled('redis', redisVersion)
+      isInstalled: binPath !== null,
+      requiresPhp: false,
+      dependenciesReady: binPath !== null
     });
   }
 
@@ -429,12 +435,15 @@ function detectServices() {
   const availableMemcached = getAvailableVersions('memcached');
   const memcachedVersion = config.memcached?.version || (availableMemcached.length > 0 ? availableMemcached[0] : undefined);
   if (memcachedVersion) {
+    const binPath = getServiceBinPath('memcached', memcachedVersion);
     services.push({ 
       name: 'Memcached', 
       type: 'memcached', 
       version: memcachedVersion,
       availableVersions: availableMemcached,
-      isInstalled: isServiceInstalled('memcached', memcachedVersion)
+      isInstalled: binPath !== null,
+      requiresPhp: false,
+      dependenciesReady: binPath !== null
     });
   }
 
@@ -442,12 +451,15 @@ function detectServices() {
   const availableMailpit = getAvailableVersions('mailpit');
   const mailpitVersion = config.mailpit?.version || (availableMailpit.length > 0 ? availableMailpit[0] : undefined);
   if (mailpitVersion) {
+    const binPath = getServiceBinPath('mailpit', mailpitVersion);
     services.push({ 
       name: 'Mailpit', 
       type: 'mailpit', 
       version: mailpitVersion,
       availableVersions: availableMailpit,
-      isInstalled: isServiceInstalled('mailpit', mailpitVersion)
+      isInstalled: binPath !== null,
+      requiresPhp: false,
+      dependenciesReady: binPath !== null
     });
   }
 
@@ -455,12 +467,15 @@ function detectServices() {
   const availableMongodb = getAvailableVersions('mongodb');
   const mongodbVersion = config.mongodb?.version || (availableMongodb.length > 0 ? availableMongodb[0] : undefined);
   if (mongodbVersion) {
+    const binPath = getServiceBinPath('mongodb', mongodbVersion);
     services.push({ 
       name: 'MongoDB', 
       type: 'mongodb', 
       version: mongodbVersion,
       availableVersions: availableMongodb,
-      isInstalled: isServiceInstalled('mongodb', mongodbVersion)
+      isInstalled: binPath !== null,
+      requiresPhp: false,
+      dependenciesReady: binPath !== null
     });
   }
 
@@ -468,12 +483,15 @@ function detectServices() {
   const availablePostgresql = getAvailableVersions('postgresql');
   const postgresqlVersion = config.postgresql?.version || (availablePostgresql.length > 0 ? availablePostgresql[0] : undefined);
   if (postgresqlVersion) {
+    const binPath = getServiceBinPath('postgresql', postgresqlVersion);
     services.push({ 
       name: 'PostgreSQL', 
       type: 'postgresql', 
       version: postgresqlVersion,
       availableVersions: availablePostgresql,
-      isInstalled: isServiceInstalled('postgresql', postgresqlVersion)
+      isInstalled: binPath !== null,
+      requiresPhp: false,
+      dependenciesReady: binPath !== null
     });
   }
 
@@ -1848,14 +1866,7 @@ ipcMain.handle('install-service', async (event, { url, serviceId, version, insta
     });
 
     // 2. Extraer
-    log(`Extrayendo en ${destDir}...`);
-    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-    
-    // Usamos PowerShell para extraer sin dependencias externas
-    const psCommand = `powershell.exe -Command "Expand-Archive -Path '${filePath}' -DestinationPath '${destDir}' -Force"`;
-    await execAsync(psCommand);
-
-    log(`Extracción completada.`);
+  await installFromZip({ zipPath: filePath, destDir, onLog: log });
 
     // 3. Limpiar
     fs.unlinkSync(filePath);

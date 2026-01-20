@@ -126,6 +126,40 @@ function SettingsView({ config, setConfig, t, availableLanguages }) {
         </div>
 
         <div className="p-6 bg-app-bg/10">
+          <div className="flex items-center justify-between bg-app-surface p-4 rounded-2xl border border-app-border shadow-sm mb-4">
+            <div>
+              <p className="text-sm font-black text-app-text uppercase italic tracking-tight">{t.toastTitle || 'Notificaciones'}</p>
+              <p className="text-[10px] font-bold text-app-text-muted">{t.toastDesc || 'Muestra toasts de éxito y error. Puedes desactivarlos si prefieres una UX silenciosa.'}</p>
+            </div>
+            <button 
+              onClick={() => setLocalConfig({...localConfig, toastEnabled: !(localConfig.toastEnabled ?? true)})}
+              className={`w-12 h-6 rounded-full transition-all duration-500 relative border-2 ${
+                localConfig.toastEnabled ?? true ? 'bg-app-primary/10 border-app-primary/40' : 'bg-app-bg border-app-border'
+              }`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-500 shadow-sm ${
+                localConfig.toastEnabled ?? true ? 'left-6.5 bg-app-primary' : 'left-0.5 bg-app-text-muted/50'
+              }`}></div>
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between bg-app-surface p-4 rounded-2xl border border-app-border shadow-sm">
+            <div>
+              <p className="text-sm font-black text-app-text uppercase italic tracking-tight">{t.autoMonitor || 'Monitoreo automático'}</p>
+              <p className="text-[10px] font-bold text-app-text-muted">{t.autoMonitorDesc || 'Refresca el estado cada pocos segundos y al recuperar el foco.'}</p>
+            </div>
+            <button 
+              onClick={() => setLocalConfig({...localConfig, monitoringAuto: !(localConfig.monitoringAuto ?? true)})}
+              className={`w-12 h-6 rounded-full transition-all duration-500 relative border-2 ${
+                localConfig.monitoringAuto ?? true ? 'bg-app-primary/10 border-app-primary/40' : 'bg-app-bg border-app-border'
+              }`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-500 shadow-sm ${
+                localConfig.monitoringAuto ?? true ? 'left-6.5 bg-app-primary' : 'left-0.5 bg-app-text-muted/50'
+              }`}></div>
+            </button>
+          </div>
+
           <div className="flex items-center justify-between bg-app-surface p-4 rounded-2xl border border-app-border shadow-sm">
             <div>
               <p className="text-sm font-black text-app-text uppercase italic tracking-tight">{t.autoStart}</p>

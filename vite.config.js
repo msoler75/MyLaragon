@@ -13,160 +13,136 @@ export default defineConfig({
     tailwindcss(),
     react(),
     {
-      name: 'copy-services-json',
+      name: 'copy-neutralino-files',
       apply: 'build',
-      writeBundle() {
-        // Copiar services.json desde LA RAÍZ a neutralino/www después del build
-        // El de la raíz es el que tiene el formato correcto { "services": [...] }
-        const source = path.resolve('services.json');
-        const target = path.resolve('neutralino/www/services.json');
-        try {
-          if (fs.existsSync(source)) {
-            fs.copyFileSync(source, target);
-            console.log('✓ services.json (ROOT) copiado a neutralino/www/');
-          } else {
-            // Fallback al de public si el de raíz no existe
-            const publicSource = path.resolve('public/services.json');
-            if (fs.existsSync(publicSource)) {
-              fs.copyFileSync(publicSource, target);
-              console.log('✓ services.json (PUBLIC) copiado a neutralino/www/');
+      buildStart() {
+        const wwwDir = path.resolve('neutralino/www');
+        
+        // Función para sincronizar archivos fuente -> www (para cuando fallan los enlaces simbólicos)
+        const syncFile = (src, destName) => {
+          const srcPath = path.resolve(src);
+          const destPath = path.join(wwwDir, destName);
+          
+          try {
+            if (fs.existsSync(srcPath)) {
+              // Si no existe el destino o el origen es más nuevo, copiar
+              const srcStats = fs.statSync(srcPath);
+              let shouldCopy = !fs.existsSync(destPath);
+              
+              if (!shouldCopy) {
+                const destStats = fs.statSync(destPath);
+                // Si es un enlace simbólico, no tocar nada
+                if (fs.lstatSync(destPath).isSymbolicLink()) return;
+                shouldCopy = srcStats.mtime > destStats.mtime;
+              }
+              
+              if (shouldCopy) {
+                fs.copyFileSync(srcPath, destPath);
+                console.log(`[SYNC] ✓ ${destName} sincronizado`);
+              }
             }
+          } catch (e) {
+            console.warn(`[SYNC] ⚠️ Error sincronizando ${destName}:`, e.message);
           }
-        } catch (e) {
-          console.warn('⚠️ Error copiando services.json:', e.message);
+        };
+
+        if (!fs.existsSync(wwwDir)) {
+          fs.mkdirSync(wwwDir, { recursive: true });
         }
 
-        // Copiar index.html personalizado para Neutralino
-        const builtIndex = path.resolve('neutralino/www/index.html');
+        // Sincronizar archivos críticos antes de limpiar lo demás
+        syncFile('neutralino/neutralino-shim.js', 'neutralino-shim.js');
+        syncFile('services.json', 'services.json');
+        syncFile('neutralino/neutralino.js', 'neutralino.js');
+        syncFile('neutralino/vite.svg', 'vite.svg');
+        syncFile('neutralino/bootstrap.html', 'bootstrap.html');
+
+        const files = fs.readdirSync(wwwDir);
+        // Archivos a preservar (enlaces simbólicos y archivos de Neutralino)
+        const preserve = ['neutralino.js', 'neutralino-shim.js', 'services.json', 'vite.svg', 'bootstrap.html', 'test-services.html'];
+        
+        files.forEach(file => {
+          if (!preserve.includes(file)) {
+            const filePath = path.join(wwwDir, file);
+            try {
+              const stats = fs.lstatSync(filePath);
+              if (stats.isDirectory()) {
+                fs.rmSync(filePath, { recursive: true, force: true });
+              } else if (!stats.isSymbolicLink()) {
+                // Solo eliminar archivos regulares, no enlaces simbólicos
+                fs.unlinkSync(filePath);
+              }
+            } catch (e) {
+              console.warn(`⚠️ No se pudo eliminar ${file}:`, e.message);
+            }
+          }
+        });
+        console.log('✓ www/ preparado y sincronizado');
+      },
+      writeBundle() {
+        // Mover el index.html de la subcarpeta neutralino/ a la raíz de www/
+        const wrongPath = path.resolve('neutralino/www/neutralino/index.html');
+        const correctPath = path.resolve('neutralino/www/index.html');
+        
+        if (fs.existsSync(wrongPath)) {
+          fs.renameSync(wrongPath, correctPath);
+          // Eliminar el directorio vacío
+          try {
+            fs.rmdirSync(path.resolve('neutralino/www/neutralino'));
+            console.log('[BUILD] ✓ index.html movido a la raíz de www/');
+          } catch (e) {
+            // Ignorar si no se puede eliminar
+          }
+        }
+        
+        // Parchear el index.html generado por Vite en lugar de reemplazarlo
+        const builtIndex = correctPath;
+        
         try {
           if (fs.existsSync(builtIndex)) {
-            // Leer el index.html compilado para extraer los assets
-            const compiledIndex = fs.readFileSync(builtIndex, 'utf-8');
-            const jsMatch = compiledIndex.match(/<script[^>]*src="([^"]*\.js)"[^>]*><\/script>/);
-            const cssMatch = compiledIndex.match(/<link[^>]*href="([^"]*\.css)"[^>]*>/);
+            // Leer el index.html compilado
+            let htmlContent = fs.readFileSync(builtIndex, 'utf-8');
             
-            const jsSrc = jsMatch ? jsMatch[1] : './assets/index.js';
-            const cssHref = cssMatch ? cssMatch[1] : './assets/index.css';
+            console.log('[BUILD] Parcheando index.html generado por Vite...');
             
-            // Crear index.html con React assets y Neutralino shim
-            const customIndex = `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WebServDev</title>
+            // 1. Limpiar rutas /www/ a /
+            htmlContent = htmlContent.replace(/href="\/www\//g, 'href="/');
+            htmlContent = htmlContent.replace(/src="\/www\//g, 'src="/');
+            
+            // 2. Asegurar que neutralino.js y neutralino-shim.js estén cargados ANTES del script de React
+            // Buscar el <head> y agregar los scripts de Neutralino si no existen
+            // Usar rutas relativas porque documentRoot="/www/" en neutralino.config.json
+            if (!htmlContent.includes('neutralino.js')) {
+              htmlContent = htmlContent.replace(
+                '</title>',
+                `</title>
     <!-- Neutralino SDK and Shim - MUST load FIRST -->
-    <script src="/neutralino.js"><\/script>
-    <script>
-      // Loader with explicit logging in case neutralino.js fails to load
-      (function(){
-        try{
-          console.log('Attempting to detect Neutralino...');
-          if (typeof Neutralino === 'undefined') {
-            console.log('Neutralino not present yet — ensuring script tag present');
-            var s = document.createElement('script');
-            s.src = '/neutralino.js';
-            s.onload = function(){ console.log('neutralino.js loaded via loader'); };
-            s.onerror = function(e){ console.warn('neutralino.js failed to load (loader)', e); };
-            document.head.appendChild(s);
-          } else {
-            console.log('Neutralino global already present');
-          }
-        }catch(e){ console.warn('Loader error', e); }
-      })();
-    <\/script>
-    <script src="/neutralino-shim.js"><\/script>
-    <script>
-      // Dynamic base: use ./ when loaded from file://, otherwise use / when served by neutralino server
-      (function(){
-        try{
-          var b = document.createElement('base');
-          if (location.protocol === 'file:') b.href = './';
-          else b.href = '/';
-          document.head.appendChild(b);
-          console.log('Base href set to', b.href);
-        }catch(e){ console.warn('Could not set base href', e); }
-      })();
-    <\/script>
-    <link rel="stylesheet" crossorigin href="${cssHref.startsWith('http') ? cssHref : (cssHref.startsWith('/') ? cssHref : './' + cssHref.replace(/^\.\//, ''))}">
-  </head>
-  <body>
-    <script>
-      // Ensure base works in both file:// and server modes (fallback in body)
-      (function(){
-        try{
-          if (!document.querySelector('base')){
-            var b = document.createElement('base');
-            if (location.protocol === 'file:') b.href = './';
-            else b.href = '/';
-            document.head.appendChild(b);
-            console.log('Body-inserted base href set to', b.href);
-          }
-        }catch(e){console.warn('Could not insert base in body', e);}
-      })();
-    <\/script>
-    <div id="root"></div>
-    <div id="status" style="padding:12px;color:#666;font-family:sans-serif">Cargando app…</div>
-    <script>
-      console.log('HTML loaded, starting React...');
-      document.getElementById('status').innerText = 'HTML loaded — iniciando...';
-      console.log('Assets: ${jsSrc}');
-      (async function(){
-        try {
-          if (typeof Neutralino !== 'undefined') {
-            Neutralino.init();
-            console.log('Neutralino global found and initialized');
-            document.getElementById('status').innerText = 'Neutralino inicializado — cargando app';
-            try {
-              await Neutralino.filesystem.writeFile('app-log.txt', 'Loaded at ' + new Date().toISOString());
-              console.log('Wrote app-log.txt to app working dir');
-            } catch(e) {
-              console.warn('Could not write app-log.txt:', e && e.message ? e.message : e);
+    <script src="./neutralino.js"></script>
+    <script src="./neutralino-shim.js"></script>`
+              );
+              console.log('[BUILD] Scripts de Neutralino agregados al <head>');
+            } else {
+              console.log('[BUILD] Scripts de Neutralino ya presentes');
             }
-          } else {
-            console.warn('Neutralino global not present at HTML startup');
-            document.getElementById('status').innerText = 'Neutralino no disponible — cargando UI (sin APIs nativas)';
-          }
-        } catch(e) { console.error('Startup script error', e); document.getElementById('status').innerText='Startup error'; }
-      })();
-    </script>
-    <!-- React App - loads after Neutralino is ready -->
-    <script type="module" crossorigin src="${jsSrc}"><\/script>
-  </body>
-</html>`;
-            fs.writeFileSync(builtIndex, customIndex);
-            console.log('✓ index.html personalizado aplicado con assets compilados');
-
-            // Ensure bootstrap.html remains in neutralino/www after Vite cleans outDir
-            try {
-              const srcBoot = path.resolve('neutralino/bootstrap.html');
-              const dstBoot = path.resolve('neutralino/www/bootstrap.html');
-              if (fs.existsSync(srcBoot)) {
-                fs.copyFileSync(srcBoot, dstBoot);
-                console.log('✓ Copiado neutralino/bootstrap.html -> neutralino/www/bootstrap.html (post-build)');
-              } else {
-                const bootstrapContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bootstrap</title></head><body><h1>Bootstrap loader</h1><script>/* bootstrap will probe candidates */</script></body></html>`;
-                fs.writeFileSync(dstBoot, bootstrapContent, 'utf-8');
-                console.log('✓ bootstrap.html (post-build) creado en neutralino/www/ (fallback)');
-              }
-              // Also copy to neutralino root so neu includes it when using cli.copyItems or when packaging root files
-              try {
-                const bootstrapRoot = path.resolve('neutralino/bootstrap.html');
-                if (!fs.existsSync(bootstrapRoot)) {
-                  // if root doesn't exist yet, create from dst
-                  fs.copyFileSync(dstBoot, bootstrapRoot);
-                }
-                console.log('✓ bootstrap.html (post-build) exists in neutralino root');
-              } catch (e) {
-                console.warn('⚠️ No se pudo asegurar bootstrap en la raíz:', e && e.message ? e.message : e);
-              }
-            } catch (err) {
-              console.warn('⚠️ Error creando/asegurando bootstrap.html post-build:', err && err.message ? err.message : err);
-            }
+            
+            // Escribir el HTML parcheado
+            fs.writeFileSync(builtIndex, htmlContent);
+            console.log('[BUILD] ✓ index.html parcheado correctamente');
           }
         } catch (e) {
-          console.warn('⚠️ Error aplicando index.html personalizado:', e.message);
+          console.error('[BUILD] ✗ Error parcheando index.html:', e.message);
+        }
+        
+        // Asegurar bootstrap.html
+        try {
+          const srcBoot = path.resolve('neutralino/bootstrap.html');
+          const dstBoot = path.resolve('neutralino/www/bootstrap.html');
+          if (fs.existsSync(srcBoot) && !fs.existsSync(dstBoot)) {
+            fs.copyFileSync(srcBoot, dstBoot);
+            console.log('[BUILD] ✓ bootstrap.html copiado');
+          }
+        } catch (e) {
+          console.warn('[BUILD] ⚠️ Error con bootstrap.html:', e.message);
         }
       }
     },
@@ -245,10 +221,14 @@ export default defineConfig({
       }
     }
   ],
+  root: '.', // Cambiar root a la raíz del proyecto para que Tailwind encuentre los archivos
   base: './',
   build: {
+    rollupOptions: {
+      input: './neutralino/index.html'
+    },
     outDir: 'neutralino/www',
-    emptyOutDir: true
+    emptyOutDir: false  // No limpiar, lo hacemos manualmente en buildStart
   },
   server: {
     port: 5173

@@ -18,7 +18,8 @@
     "os.*",
     "filesystem.*",
     "window.*",
-    "app.*"
+    "app.*",
+    "debug.*"
   ],
   "globalVariables": {},
   "modes": {

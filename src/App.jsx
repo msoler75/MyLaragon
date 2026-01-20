@@ -43,19 +43,30 @@ Object.entries(themeFiles).forEach(([path, content]) => {
 function App() {
   const [activeTab, setActiveTab] = useState('services')
   const [services, setServices] = useState([])
-  const [config, setConfig] = useState({ language: 'es', theme: 'system' })
+  const [config, setConfig] = useState({ language: 'es', theme: 'system', toastEnabled: true, monitoringAuto: true })
   const [loading, setLoading] = useState(false)
   const [processingServices, setProcessingServices] = useState([])
   const [isBulkRunning, setIsBulkRunning] = useState(false)
   const [logs, setLogs] = useState([])
   const [unreadErrors, setUnreadErrors] = useState(0)
-  const [isMonitoring, setIsMonitoring] = useState(false)
+  const [isMonitoring, setIsMonitoring] = useState(true)
   const [hiddenServices, setHiddenServices] = useState(() => {
-    const saved = localStorage.getItem('hiddenServices')
-    return saved ? JSON.parse(saved) : []
+    try {
+      const saved = localStorage.getItem('hiddenServices')
+      const parsed = saved ? JSON.parse(saved) : []
+      return Array.isArray(parsed) ? parsed : []
+    } catch (e) { return [] }
   })
+  const [toasts, setToasts] = useState([])
 
-  const t = translations[config.language] || translations.es
+  const activeTranslations = translations[config.language] || translations.es || {};
+  const t = activeTranslations;
+  
+  if (Object.keys(translations).length === 0) {
+    console.error('[APP] ERROR: No hay traducciones cargadas!');
+  }
+  
+  console.log('[APP] Render App. activeTab:', activeTab, 'Services:', services.length, 't keys:', Object.keys(t).length);
 
   const refreshingRef = useRef(false);
   const loadServices = useCallback(async (isSilent = false, hiddenServicesOverride = null) => {
@@ -69,19 +80,24 @@ function App() {
       refreshingRef.current = true;
       if (!silent) setLoading(true)
       try {
+        console.log('[APP] Llamando a getServices con hidden:', hiddenToUse);
         const servicesData = await window.electronAPI.getServices(hiddenToUse)
-        console.log('[APP] Servicios recibidos:', servicesData);
-        // Solo actualizamos si no hay acciones en curso que puedan ser invalidadas
-        setServices(servicesData)
-        console.log('[APP] State actualizado con', servicesData?.length || 0, 'servicios');
+        console.log('[APP] Servicios recibidos (DATA):', JSON.stringify(servicesData));
+        
+        if (!servicesData || !Array.isArray(servicesData)) {
+          console.error('[APP] getServices no devolvió un array válido:', servicesData);
+        } else {
+          setServices(servicesData)
+          console.log('[APP] State actualizado con', servicesData.length, 'servicios');
+        }
       } catch (error) {
-        console.error('[APP] Error loading services:', error)
+        console.error('[APP] Error fatal cargando servicios:', error)
       } finally {
         if (!silent) setLoading(false)
         refreshingRef.current = false;
       }
     } else {
-      console.log('[APP] electronAPI no disponible:', !window.electronAPI, 'refrescando:', refreshingRef.current);
+      console.log('[APP] loadServices saltado. electronAPI:', !!window.electronAPI, 'refrescando:', refreshingRef.current);
     }
   }, [hiddenServices]);
 
@@ -117,6 +133,7 @@ function App() {
       if (window.electronAPI) {
         const data = await window.electronAPI.getConfig()
         setConfig(data)
+        setIsMonitoring(data.monitoringAuto ?? true)
       }
     }
     loadConfig()
@@ -175,14 +192,25 @@ function App() {
   }, [activeTab]);
 
   useEffect(() => {
+    const onFocus = () => loadServices(true);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [loadServices]);
+
+  useEffect(() => {
     localStorage.setItem('hiddenServices', JSON.stringify(hiddenServices))
     loadServices()
   }, [hiddenServices])
 
   // Sistema de actualización inteligente: pausa durante acciones para evitar parpadeos y race conditions
   useEffect(() => {
+    // Si hay procesos en curso (start/stop) o el shim indica que está instalando, pausamos el polling
     if (isMonitoring && processingServices.length === 0) {
-      const interval = setInterval(() => loadServices(true), 7000)
+      const interval = setInterval(() => {
+        // Doble comprobación: si el shim está ocupado instalando, saltamos este tick
+        if (window.__is_installing) return;
+        loadServices(true);
+      }, 7000)
       return () => clearInterval(interval)
     }
   }, [isMonitoring, hiddenServices, processingServices.length, loadServices])
@@ -193,6 +221,18 @@ function App() {
     return () => window.removeEventListener('change-tab', handleTabChange);
   }, []);
 
+  const pushToast = ({ title, message, type = 'info', id }) => {
+    if (config.toastEnabled === false) {
+      console.log('[TOAST:disabled]', title, message);
+      return;
+    }
+    const toastId = id || Date.now() + Math.random();
+    setToasts(prev => [...prev, { id: toastId, title, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== toastId));
+    }, 4200);
+  };
+
   const handleStartService = async (serviceName) => {
     if (window.electronAPI && !processingServices.includes(serviceName)) {
       try {
@@ -200,6 +240,13 @@ function App() {
         
         // Identificar tipo para el delay de estabilización
         const service = services.find(s => s.name === serviceName);
+
+        // Dependencias faltantes (p.ej. Apache requiere PHP)
+        if (service && service.requiresPhp && service.dependenciesReady === false) {
+          pushToast({ title: serviceName, message: t.phpRequired || 'Requiere PHP instalado', type: 'error' });
+          setProcessingServices(prev => prev.filter(s => s !== serviceName));
+          return;
+        }
 
         // Si el servicio no está instalado, redirigir a la vista de instalación
         if (service && service.isInstalled === false) {
@@ -222,7 +269,7 @@ function App() {
         
         if (!result.success) {
           console.error('Error starting service:', result.message);
-          alert(`Error al iniciar ${serviceName}: ${result.message}`);
+          pushToast({ title: serviceName, message: result.message || 'Error al iniciar', type: 'error' });
           setProcessingServices(prev => prev.filter(s => s !== serviceName));
           return;
         }
@@ -232,9 +279,10 @@ function App() {
         await new Promise(resolve => setTimeout(resolve, delay));
         
         await loadServices();
+        pushToast({ title: serviceName, message: t.started || 'Iniciado', type: 'success' });
       } catch (error) {
         console.error('Error starting service:', error);
-        alert(`Error al iniciar ${serviceName}: ${error.message || error}`);
+        pushToast({ title: serviceName, message: error.message || 'Error al iniciar', type: 'error' });
       } finally {
         setProcessingServices(prev => prev.filter(s => s !== serviceName))
       }
@@ -257,8 +305,10 @@ function App() {
         await new Promise(resolve => setTimeout(resolve, delay));
         
         await loadServices()
+        pushToast({ title: serviceName, message: t.stopped || 'Detenido', type: 'info' });
       } catch (error) {
         console.error('Error stopping service:', error);
+        pushToast({ title: serviceName, message: error.message || 'Error al detener', type: 'error' });
       } finally {
         setProcessingServices(prev => prev.filter(s => s !== serviceName))
       }
@@ -340,7 +390,14 @@ function App() {
           
           <div className="flex items-center space-x-4">
             <button 
-              onClick={() => setIsMonitoring(prev => !prev)}
+              onClick={async () => {
+                const next = !isMonitoring;
+                setIsMonitoring(next);
+                setConfig(prev => ({ ...prev, monitoringAuto: next }));
+                if (window.electronAPI) {
+                  await window.electronAPI.setConfig({ ...config, monitoringAuto: next });
+                }
+              }}
               className={`flex items-center space-x-2 px-3 py-2 rounded-xl border text-[10px] font-black shadow-sm transition-all uppercase tracking-wider ${
                 isMonitoring 
                   ? 'bg-app-success/10 text-app-success border-app-success/30' 
@@ -350,6 +407,20 @@ function App() {
             >
               <Activity size={16} className={isMonitoring ? 'animate-pulse' : ''} />
               <span className="hidden sm:inline">{isMonitoring ? 'Auto' : 'Manual'}</span>
+            </button>
+
+            <button 
+              onClick={() => {
+                const dummy = [
+                  { name: 'DEBUG_FORCE', type: 'apache', status: 'running', isInstalled: true },
+                  { name: 'DEBUG_2', type: 'mysql', status: 'stopped', isInstalled: true }
+                ];
+                console.log('[APP] FORZANDO SERVICIOS DE DEBUG');
+                setServices(dummy);
+              }}
+              className="p-2 bg-red-500 text-white rounded-xl text-[8px] font-bold"
+            >
+              DEBUG_UI
             </button>
 
             <button 
@@ -440,6 +511,25 @@ function App() {
           </div>
         </div>
       </main>
+
+      {/* Toasts */}
+  <div className="fixed bottom-6 right-6 space-y-2 z-50 w-80 max-w-[90vw]">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`rounded-2xl border shadow-lg px-4 py-3 text-sm font-bold backdrop-blur bg-app-surface/90 transition-all animate-in fade-in slide-in-from-bottom-2 ${
+              toast.type === 'error'
+                ? 'border-app-danger/50 text-app-danger'
+                : toast.type === 'success'
+                ? 'border-app-success/50 text-app-success'
+                : 'border-app-primary/40 text-app-text'
+            }`}
+          >
+            <div className="text-xs uppercase tracking-widest font-black mb-1 opacity-80">{toast.title}</div>
+            <div className="text-sm leading-snug font-semibold">{toast.message}</div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

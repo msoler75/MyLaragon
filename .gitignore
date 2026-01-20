@@ -6,6 +6,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+app-log.txt
+debug-log.txt
 
 node_modules
 dist
@@ -20,9 +22,16 @@ data/
 tmp/
 *.local
 
+# Generated files
+services.json
+creative-ai-news.json
+shim_api.txt
+sample.png
+
 # Laragon / App Config
 user-config.json
 laragon.ini
+app.ini
 
 # Editor directories and files
 .vscode/*

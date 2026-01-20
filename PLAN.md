@@ -1,42 +1,39 @@
-# Plan de Acción: WebServDev -> Evolución Independiente 🚀
+﻿#  Plan de Proyecto y Estado Actual
 
-Este plan detalla los pasos para transformar WebServDev en una aplicación totalmente independiente y de marca propia.
+##  Roadmap (Hoja de Ruta)
 
-## 🏗️ Fase 1: Nueva Arquitectura e Infraestructura (Independencia Total)
-- [x] Definir la estructura de carpetas raíz.
-- [x] Implementar un gestor de configuración interno (`app.ini` en lugar de `laragon.ini`).
-- [x] Eliminar toda dependencia de la instalación externa de Laragon.
-- [x] Cambiar marca blanca de la app (Purga de referencias a Laragon).
+### Fase 1-4: Cimientos y Core (Completado )
+- Stack base: React + Vite + Tailwind 4 + Electron/Neutralino.
+- Gestión de servicios: Inicio/Parada de procesos reales (Apache, MySQL, etc.).
+- UI Moderna: Switches, Toasts configurables y Layout interactivo.
+- Detección de binarios y estado de puertos de forma autónoma.
 
-## 📥 Fase 2: Sistema de Gestión de Servicios (Remote Setup & Auto-update)
-- [x] Crear repositorio de metadatos (`services.json`).
-- [x] Implementar motor de descarga y descompresión.
-- [x] Implementar comprobación diaria de actualizaciones en segundo plano (cada 24h).
-- [ ] Sistema de "activación" de versiones (Symlinks/Config).
+### Fase 5: Gestión de Proyectos (En Progreso )
+- [x] Lectura de carpetas de proyectos locales.
+- [x] Apertura en Navegador y VS Code.
+- [ ] Ejecución de comandos (Composer, NPM, Artisan).
 
-## 🖥️ Fase 3: UI/UX Premium (Dashboard)
-- [x] Rediseñar el panel principal.
-- [x] Pestaña de Marketplace para instalación de servicios.
-- [ ] Elegir nuevo nombre oficial y aplicar rebranding global.
+### Fase 6: Configuraciones Avanzadas (Próximamente )
+- [ ] Editor integrado de archivos de configuración (php.ini, my.ini, etc.).
+- [ ] Personalización total de rutas desde la UI.
 
-## 🌟 Excelencia en UX (XP)
-- [x] Implementar detección inteligente de binarios (Smart Path).
-- [x] Sincronización en tiempo real del estado de servicios.
-- [x] Botones de acción contextuales (Instalar vs Iniciar).
-- [ ] Implementar un sistema de notificaciones toast para errores de sistema.
+### Fase 7-8: Herramientas y Distribución (Planificado )
+- [ ] Sistema de logs integrado.
+- [ ] Marketplace de servicios remoto (descarga de versiones).
+- [ ] Generación automática de instaladores certificados.
 
-## ⚙️ Fase 4: Automatización de Configuraciones
-- [ ] Generador de archivos de configuración dinámicos:
-  - `httpd.conf`, `php.ini`, `my.ini` basados en la ubicación de la app.
-  - Gestión automática de Virtual Hosts.
-- [ ] Editor de archivos de configuración integrado en la UI.
+---
 
-## 🛠️ Fase 5: Portabilidad y Herramientas
-- [ ] Script de "Añadir al PATH" para que los servicios sean accesibles desde cualquier terminal.
-- [ ] Terminal integrada preconfigurada con el entorno cargado.
-- [ ] Sistema de logs unificado.
+##  Estado Actual del Sistema
+- **Ultima actualización**: 20 de enero de 2026.
+- **Flujo de Desarrollo**: Estable con Neutralino como runtime principal por su ligereza.
+- **Detección de Apache**: Refinada para manejar binarios estándar de Windows (VC18+) dentro de la propia arquitectura independiente del proyecto.
 
-## 🚀 Próximos Pasos Inmediatos
-1. Crear el archivo `creative-ai-news.json` (o similar) como fuente de servicios.
-2. Implementar la estructura de carpetas base.
-3. Crear el componente de UI para la descarga de servicios.
+---
+
+##  Lista de Tareas (Checklist)
+- [x] Migración robusta a Neutralino.
+- [x] Implementación de política de "No Duplicación".
+- [x] Corrección de detección de PHP en entornos TS/NTS.
+- [ ] Implementar visor de logs en tiempo real (app-log.txt).
+- [ ] Añadir soporte para Nginx y PostgreSQL.

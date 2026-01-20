@@ -100,5 +100,6 @@
   "deleting": "Borrando",
   "noServicesDetected": "No hay servicios en el repositorio local",
   "noServicesConfigured": "Parece que aún no tienes servicios configurados o instalados en tu sistema.",
-  "verifyServicesJson": "Verifica que servicios.json exista en la raíz de la app"
+  "verifyServicesJson": "Verifica que servicios.json exista en la raíz de la app",
+  "phpRequired": "PHP requerido para iniciar"
 }

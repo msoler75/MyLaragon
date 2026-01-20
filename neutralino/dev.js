@@ -10,17 +10,29 @@ try {
     const originalUrl = config.url;
     const originalDocRoot = config.documentRoot;
     
-    // Copiar services.json a www/ para que esté disponible en desarrollo
-    const servicesSource = path.join('..', 'public', 'services.json');
-    const servicesTarget = path.join('www', 'services.json');
-    try {
-        if (fs.existsSync(servicesSource)) {
-            fs.copyFileSync(servicesSource, servicesTarget);
-            console.log(`📋 services.json copiado a www/`);
+    // Función de sincronización para desarrollo
+    const syncToWww = (src, destName) => {
+        const srcPath = path.resolve(src);
+        const destPath = path.resolve('www', destName);
+        try {
+            if (fs.existsSync(srcPath)) {
+                // Solo copiar si el destino no es un enlace simbólico
+                if (fs.existsSync(destPath) && fs.lstatSync(destPath).isSymbolicLink()) {
+                    return;
+                }
+                fs.copyFileSync(srcPath, destPath);
+                console.log(`✓ ${destName} sincronizado a www/`);
+            }
+        } catch (e) {
+            console.warn(`⚠️ Error sincronizando ${destName}:`, e.message);
         }
-    } catch (e) {
-        console.warn(`⚠️ No se pudo copiar services.json:`, e.message);
-    }
+    };
+
+    // Sincronizar archivos necesarios para que estén disponibles en el "documentRoot" de Neutralino
+    syncToWww('../services.json', 'services.json');
+    syncToWww('neutralino-shim.js', 'neutralino-shim.js');
+    syncToWww('neutralino.js', 'neutralino.js');
+    syncToWww('bootstrap.html', 'bootstrap.html');
     
     // Configuración para desarrollo con Vite
     config.url = 'http://localhost:5173/';

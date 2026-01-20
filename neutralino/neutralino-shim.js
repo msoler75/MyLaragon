@@ -1,25 +1,143 @@
 // Neutralino compatibility shim for window.electronAPI
 (function(){
+  console.log('[SHIM] Cargando Neutralino Shim v1.2.0 (Enhanced PHP Detection)');
   if(typeof Neutralino !== 'undefined') {
     Neutralino.init();
   }
   
   // Detectar raíz real en Neutralino (NL_PATH es el directorio del binary)
+  // En producción (dist/WebServDev), la raíz de la app está 2 niveles arriba (donde está bin/, www/, etc.)
   const neutralinoRoot = window.NL_PATH || '.';
+  let appRoot = neutralinoRoot;
+  
+  // Si estamos en dist/WebServDev, subir niveles para encontrar la carpeta bin/ real
+  if (window.NL_PATH && window.NL_PATH.includes('dist')) {
+    // Si la ruta termina en dist/WebServDev, la raíz real es 2 niveles arriba
+    // Ejemplo: Proyectos/MyLaragon/neutralino/dist/WebServDev -> Proyectos/MyLaragon/neutralino
+    appRoot = window.NL_PATH.replace(/[\\/]dist[\\/].*$/, '') || '.';
+    console.log('[SHIM] Detectado modo DIST, ajustando appRoot a:', appRoot);
+  }
+
+  // --- SISTEMA DE LOGS PERSISTENTES ---
+  const originalConsole = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+    info: console.info
+  };
+
+  // Flag global para evitar saturación durante instalaciones
+  window.__is_installing = false;
+
+  const logToFile = async (level, ...args) => {
+    const timestamp = new Date().toLocaleString();
+    const message = args.map(arg => {
+      try {
+        if (arg instanceof Error) {
+          return `${arg.message}\nStack: ${arg.stack}`;
+        }
+        // Manejar objetos que podrían ser errores pero no pasan el instanceof
+        if (arg && typeof arg === 'object' && arg.stack && arg.message) {
+          return `${arg.message}\nStack: ${arg.stack}`;
+        }
+        return typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg);
+      } catch(e) { return String(arg); }
+    }).join(' ');
+    
+    const logLine = `[${timestamp}] [${level}] ${message}\n`;
+
+    // 1. Guardar en archivo local (si estamos en producción Neutralino)
+    if (window.Neutralino && window.Neutralino.filesystem) {
+      try {
+        // Usar appendFile para no sobrescribir
+        await window.Neutralino.filesystem.appendFile(neutralinoRoot + '/app-debug.log', logLine);
+      } catch (e) {
+        // Fallback silencioso si el sistema de archivos no está listo
+      }
+    }
+
+    // 2. Enviar a la consola nativa de Neutralino (si existe y tiene permisos)
+    if (window.Neutralino && window.Neutralino.debug) {
+      try {
+        window.Neutralino.debug.log(logLine, level === 'ERROR' ? 'ERROR' : (level === 'WARN' ? 'WARNING' : 'INFO'))
+          .catch(() => { /* Evitar errores de permisos no capturados */ });
+      } catch (e) { /* Silencioso */ }
+    }
+
+    // 3. Empujar al sistema de logs visual de la UI
+    if (window.__neutralino_push_log) {
+      window.__neutralino_push_log({ 
+        timestamp: Date.now(), 
+        level: level === 'INFO' ? 'INFO' : level, 
+        message: message 
+      });
+    }
+  };
+
+  // Interceptar métodos de consola
+  console.log = (...args) => { logToFile('INFO', ...args); originalConsole.log.apply(console, args); };
+  console.warn = (...args) => { logToFile('WARN', ...args); originalConsole.warn.apply(console, args); };
+  console.error = (...args) => { logToFile('ERROR', ...args); originalConsole.error.apply(console, args); };
+  console.info = (...args) => { logToFile('INFO', ...args); originalConsole.info.apply(console, args); };
+  // ------------------------------------
+
   const defaultConfig = { 
-    appPath: neutralinoRoot, 
-    projectsPath: neutralinoRoot + '\\www', 
+    basePath: appRoot, 
+    projectsPath: appRoot + '\\www', 
     editor: 'notepad', 
     autoStart: false, 
     language: 'es', 
     theme: 'system' 
   };
 
+  /**
+   * Carga la configuración de servicios desde el archivo services.json
+   * Soporta tanto formato Array como Objeto { services: [...] }
+   */
+  let cachedServices = null;
+  let servicesPromise = null;
+
+  async function loadServicesConfig() {
+    if (cachedServices) return cachedServices;
+    if (servicesPromise) return servicesPromise;
+
+    servicesPromise = (async () => {
+      const paths = ['/services.json', 'services.json', './services.json', '../services.json', '/www/services.json'];
+      for (const path of paths) {
+        try {
+          console.log(`[SHIM] Intentando cargar servicios desde: ${path}`);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          
+          const res = await fetch(path, { cache: 'no-store', signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (res.ok) {
+            const data = await res.json();
+            const list = Array.isArray(data) ? data : (data && Array.isArray(data.services) ? data.services : []);
+            if (list.length > 0) {
+              console.log(`[SHIM] Servicios cargados correctamente (${list.length}) desde ${path}`);
+              console.log('[SHIM] Primer servicio:', list[0].name);
+              cachedServices = list;
+              return list;
+            }
+          }
+        } catch (e) {
+          console.warn(`[SHIM] Fallo al cargar desde ${path}:`, e.message);
+        }
+      }
+      console.warn('[SHIM] Ningún services.json encontrado, se usará el fallback');
+      return [];
+    })();
+
+    return servicesPromise;
+  }
+
   async function fileExists(path){
     try{
       console.log('[SHIM] fileExists verificando:', path);
       
-      // En desarrollo, usar Node.js backend. En Neutralino PROD existe NL_TOKEN
+      // En desarrollo, usar Node.js backend. En Neutralino PROD usar filesystem
       const isDev = !window.NL_TOKEN && (window.location.port === '5173' || window.location.hostname === 'localhost');
       if(isDev){
         console.log('[SHIM] Modo DEV - usando /api/file-exists');
@@ -72,10 +190,11 @@
       
       // En producción, usar Neutralino
       if(window.Neutralino && Neutralino.filesystem && Neutralino.filesystem.readDirectory){
-        const res = await Neutralino.filesystem.readDirectory({ path });
+        const res = await Neutralino.filesystem.readDirectory(path);
         console.log('[SHIM] readDir resultado:', res);
         if(Array.isArray(res)) return res;
         if(res && Array.isArray(res.entries)) return res.entries;
+        return [];
       }
     }catch(e){
       console.log('[SHIM] readDir error:', e.message);
@@ -83,53 +202,90 @@
     return null;
   }
 
-  async function findExecutable(type, version, exeName, laragonPath){
-    console.log('[SHIM] findExecutable:', { type, version, exeName, laragonPath });
-    if(!exeName) {
-      console.log('[SHIM] No exeName, retornando null');
-      return null;
+  async function findExecutable(type, version, exeName, basePath){
+    if(!exeName) return null;
+    const typeOrAlias = type === 'mysql' ? 'mariadb' : (type === 'mariadb' ? 'mysql' : type);
+    
+    // Rutas fijas prioritarias (Estructura estándar de binarios)
+    const candidates = [];
+    if(version) {
+      candidates.push(`${basePath}\\bin\\${type}\\${version}\\${exeName}`);
+      candidates.push(`${basePath}\\bin\\${type}\\${version}\\bin\\${exeName}`);
+      candidates.push(`${basePath}\\bin\\${typeOrAlias}\\${version}\\${exeName}`);
+      // Casos específicos: "8.2.30 (NTS)"
+      candidates.push(`${basePath}\\bin\\${type}\\${version.replace(/\s+/g, '_')}\\${exeName}`);
+      candidates.push(`${basePath}\\neutralino\\bin\\${type}\\${version}\\${exeName}`);
     }
+    candidates.push(`${basePath}\\bin\\${type}\\${exeName}`);
+    candidates.push(`${basePath}\\bin\\${typeOrAlias}\\${exeName}`);
     
-    // try explicit version first
-    if(version){
-      const full = `${laragonPath}\\bin\\${type}\\${version}\\${exeName}`;
-      console.log('[SHIM] Verificando versión específica:', full);
-      if(await fileExists(full)) {
-        console.log('[SHIM] Encontrado en versión específica:', full);
-        return full;
-      }
+    for(const cand of candidates) {
+      const p = cand.replace(/\\\\+/g, '\\');
+      if (await fileExists(p)) return p;
     }
-    
-    const base = `${laragonPath}\\bin\\${type}`;
-    console.log('[SHIM] Base path:', base);
-    
-    // try scanning versions folders
-    console.log('[SHIM] Leyendo directorio:', base);
-    const listing = await readDir(base);
-    console.log('[SHIM] Directorio leído, entradas:', listing ? listing.length : 'null');
-    
-    if(listing){
-      for(const entry of listing){
-        const name = (entry && entry.name) ? entry.name : entry;
-        const candidate = `${base}\\${name}\\${exeName}`;
-        console.log('[SHIM] Verificando candidato:', candidate);
-        if(await fileExists(candidate)) {
-          console.log('[SHIM] Encontrado:', candidate);
-          return candidate;
+
+    // Búsqueda superficial (solo 1 nivel) si no se encontró en rutas fijas
+    const rootsToScan = [
+      `${basePath}\\bin\\${type}`,
+      `${basePath}\\bin\\${typeOrAlias}`,
+      `${basePath}\\neutralino\\bin\\${type}`
+    ].map(r => r.replace(/\\\\+/g, '\\'));
+
+    for(const root of rootsToScan) {
+      if (await fileExists(root)) {
+        const entries = await readDir(root);
+        if(!entries) continue;
+        for(const entry of entries) {
+           const name = (typeof entry === 'object') ? (entry.entry || entry.name) : entry;
+           if(!name || name.startsWith('.')) continue;
+           
+           // Probar: root/name/exeName o root/name/bin/exeName
+           const p1 = `${root}\\${name}\\${exeName}`.replace(/\\\\+/g, '\\');
+           if(await fileExists(p1)) return p1;
+           const p2 = `${root}\\${name}\\bin\\${exeName}`.replace(/\\\\+/g, '\\');
+           if(await fileExists(p2)) return p2;
         }
       }
     }
-    
-    // try exe directly under type folder
-    const direct = `${base}\\${exeName}`;
-    console.log('[SHIM] Verificando directo:', direct);
-    if(await fileExists(direct)) {
-      console.log('[SHIM] Encontrado directo:', direct);
-      return direct;
-    }
-    
-    console.log('[SHIM] No se encontró el ejecutable');
     return null;
+  }
+
+  async function getAvailableVersions(basePath, serviceType){
+    console.log(`[SHIM] getAvailableVersions para ${serviceType} en ${basePath}`);
+    const versions = [];
+    
+    // Lista de rutas base donde buscar
+    const baseRoots = [
+      `${basePath}\\bin\\${serviceType}`,
+      `${basePath}\\neutralino\\bin\\${serviceType}`,
+      `${basePath}\\usr\\bin\\${serviceType}`,
+      `.\\bin\\${serviceType}`,
+      `.\\neutralino\\bin\\${serviceType}`,
+      `..\\bin\\${serviceType}`,
+      `${neutralinoRoot}\\bin\\${serviceType}`
+    ].map(p => p.replace(/\\\\/g, '\\').replace(/\\$/, ''));
+
+    for (const root of baseRoots) {
+      if (!(await fileExists(root))) {
+        continue;
+      }
+      
+      const entries = await readDir(root);
+      console.log(`[SHIM] readDir para ${root}:`, entries);
+      if (entries) {
+        for (const entry of entries) {
+          const name = (entry && typeof entry === 'object') ? (entry.entry || entry.name) : entry;
+          if (!name || name === '.' || name === '..') continue;
+          
+          if (!versions.includes(name)) {
+            versions.push(name);
+          }
+        }
+      }
+    }
+    const sorted = versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+    console.log(`[SHIM] Resultado para ${serviceType}:`, sorted);
+    return sorted;
   }
   function safeOpen(url){
     try{
@@ -144,52 +300,58 @@
   // Cache para netstat
   let netstatCache = null;
   let netstatCacheTime = 0;
+  let activeNetstatFetch = null;
 
   async function getNetstatData(){
     const now = Date.now();
     
     // Si el caché es válido (< 3 segundos), devolverlo
     if(netstatCache && (now - netstatCacheTime) < 3000){
-      console.log('[SHIM] Usando netstat caché');
       return netstatCache;
     }
+
+    // Si ya hay una petición en curso, esperar a esa
+    if(activeNetstatFetch) return activeNetstatFetch;
     
-    try {
-      console.log('[SHIM] Ejecutando: netstat -ano | findstr LISTENING');
-      const result = await execCommand(`cmd /c "netstat -ano | findstr LISTENING"`);
-      if(!result || !result.stdout) {
-        netstatCache = {};
-        netstatCacheTime = now;
-        return netstatCache;
-      }
-      
-      // Parsear resultado: agrupar por puerto
-      const portMap = {};
-      const lines = result.stdout.split('\r\n');
-      for(const line of lines){
-        if(line.includes('LISTENING')){
-          // Formato flexible: TCP/UDP address:port ... LISTENING pid
-          // Ejemplo: "  TCP    0.0.0.0:80    0.0.0.0:0    LISTENING    6908"
-          const match = line.match(/:(\d+)\s+.*?LISTENING\s+(\d+)/i);
-          if(match){
-            const port = match[1];
-            const pid = match[2];
-            portMap[port] = pid;
-            console.log('[SHIM] Detectado puerto', port, '-> PID', pid);
+    activeNetstatFetch = (async () => {
+      try {
+        console.log('[SHIM] Ejecutando: netstat -ano | findstr LISTENING');
+        const result = await execCommand(`cmd /c "netstat -ano | findstr LISTENING"`);
+        if(!result || !result.stdout) {
+          netstatCache = {};
+          netstatCacheTime = now;
+          return netstatCache;
+        }
+        
+        // Parsear resultado: agrupar por puerto
+        const portMap = {};
+        const lines = result.stdout.split('\r\n');
+        for(const line of lines){
+          if(line.includes('LISTENING')){
+            const match = line.match(/:(\d+)\s+.*?LISTENING\s+(\d+)/i);
+            if(match){
+              const port = match[1];
+              const pid = match[2];
+              portMap[port] = pid;
+            }
           }
         }
+        
+        netstatCache = portMap;
+        netstatCacheTime = now;
+        console.log('[SHIM] Netstat caché actualizado:', Object.keys(portMap).length, 'puertos');
+        return portMap;
+      }catch(e){
+        console.log('[SHIM] Error en getNetstatData:', e.message);
+        netstatCache = {};
+        netstatCacheTime = now;
+        return {};
+      } finally {
+        activeNetstatFetch = null;
       }
-      
-      netstatCache = portMap;
-      netstatCacheTime = now;
-      console.log('[SHIM] Netstat caché actualizado:', Object.keys(portMap).length, 'puertos');
-      return portMap;
-    }catch(e){
-      console.log('[SHIM] Error en getNetstatData:', e.message);
-      netstatCache = {};
-      netstatCacheTime = now;
-      return {};
-    }
+    })();
+
+    return activeNetstatFetch;
   }
 
   function invalidateNetstatCache(){
@@ -202,29 +364,37 @@
 
   // Cache para lista de procesos
   let processCache = null;
-  let processCacheTime = 0;
+  let lastTaskListUpdate = 0;
   let activeProcessFetch = null;
 
-  async function getProcessList(){
+  async function getProcessList() {
     const now = Date.now();
-    if(processCache && (now - processCacheTime) < 3000) return processCache;
-    if(activeProcessFetch) return activeProcessFetch;
-    
+    if (processCache && (now - lastTaskListUpdate < 10000)) {
+      return processCache;
+    }
+
+    if (activeProcessFetch) return activeProcessFetch;
+
     activeProcessFetch = (async () => {
       try {
         console.log('[SHIM] Actualizando lista de procesos...');
         const result = await execCommand('tasklist /NH /FO CSV');
-        if(result && result.stdout){
+        if (result && result.stdout) {
           processCache = result.stdout.toLowerCase();
-          processCacheTime = Date.now();
+          lastTaskListUpdate = Date.now();
+        } else {
+          processCache = '';
         }
-      } catch(e){
-        console.log('[SHIM] Error obteniendo lista de procesos:', e.message);
+        return processCache;
+      } catch (e) {
+        console.warn('[SHIM] Error actualizando lista de procesos:', e.message);
+        processCache = '';
+        return '';
+      } finally {
+        activeProcessFetch = null;
       }
-      activeProcessFetch = null;
-      return processCache || "";
     })();
-    
+
     return activeProcessFetch;
   }
 
@@ -242,47 +412,23 @@
     return null;
   }
 
-  async function checkServiceStatus(service, laragonPath){
-    console.log('[SHIM] checkServiceStatus para:', service.name);
-    try{
-      const type = service.type.toLowerCase();
-      const portMap = {
-        'apache': 80,
-        'nginx': 80,
-        'mysql': 3306,
-        'mariadb': 3306,
-        'postgresql': 5432,
-        'postgres': 5432,
-        'redis': 6379,
-        'memcached': 11211,
-        'mailpit': 8025,
-        'mongodb': 27017
-      };
+  async function checkServiceStatus(service) {
+    try {
+      if (!service) return { status: 'stopped', port: null, details: 'Servicio inválido' };
       
-      const exeMap = {
-        'apache': 'httpd.exe',
-        'nginx': 'nginx.exe',
-        'mysql': 'mysqld.exe',
-        'mariadb': 'mysqld.exe',
-        'postgresql': 'postgres.exe',
-        'postgres': 'postgres.exe',
-        'redis': 'redis-server.exe',
-        'memcached': 'memcached.exe',
-        'mailpit': 'mailpit.exe',
-        'mongodb': 'mongod.exe'
-      };
-      
-      const port = portMap[type];
-      const processName = exeMap[type];
-      
-      // Intentar verificar estado real mediante API
+      const port = service.port || null;
       const statusPromise = (async () => {
         try {
-          // Verificar si el proceso está corriendo usando la lista cacheada
+          const type = (service.type || service.id || service.name || '').toLowerCase();
           let processRunning = false;
+          let processName = service.processName || '';
+
+          // Verificar si el proceso está corriendo usando la lista cacheada
           try {
             const processList = await getProcessList();
-            processRunning = processList.includes(processName.toLowerCase());
+            if (processList && processName) {
+              processRunning = processList.includes(processName.toLowerCase());
+            }
             console.log('[SHIM]', service.name, 'running check (cache):', processRunning);
           } catch(e) {
             console.log('[SHIM] Error verificando proceso:', e.message);
@@ -346,14 +492,17 @@
         }
       })();
       
-      // Timeout de 2500ms por servicio (netstat y tasklist ya están cacheados)
+      // Timeout de 5000ms por servicio (aumentado para evitar falsos positivos durante carga)
+      // Si estamos instalando algo, aumentamos a 15s para no interferir
+      const timeoutMs = window.__is_installing ? 15000 : 5000;
+      
       return Promise.race([
         statusPromise,
         new Promise(resolve => {
           setTimeout(() => {
             console.log('[SHIM] Timeout verificando', service.name, '- retornando unknown');
-            resolve({ status: 'unknown', port, processRunning: false, portInUse: false, details: 'Estado desconocido' });
-          }, 2500);
+            resolve({ status: 'unknown', port, processRunning: false, portInUse: false, details: 'Estado desconocido (Timeout)' });
+          }, timeoutMs);
         })
       ]);
     }catch(e){
@@ -363,6 +512,10 @@
   }
 
   async function execCommand(cmd){
+    if(!cmd){
+      console.warn('[SHIM] execCommand llamado sin comando');
+      return { stdout: '', stderr: 'No command' };
+    }
     try{
       // En desarrollo (puerto 5173), usar siempre /api/exec
       const isDev = !window.NL_TOKEN && (window.location.port === '5173' || window.location.hostname === 'localhost');
@@ -400,148 +553,146 @@
 
   window.electronAPI = {
     getServices: async (hiddenServices)=>{
-      console.log('[SHIM] getServices called');
+      const startTime = Date.now();
+      console.log('[SHIM] >>> getServices INICIO');
       try{
         const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
-        const laragonPath = cfg.laragonPath || defaultConfig.laragonPath;
+        
+        let basePath = cfg.basePath || defaultConfig.basePath || appRoot;
+        console.log('[SHIM] Path Base:', basePath);
+        console.log('[SHIM] appRoot:', appRoot);
 
-        // Cargar configuración de servicios (desde Vite/public)
-        let servicesList = [];
-        try{
-          // En producción Neutralino, usar fetch al servidor interno
-          console.log('[SHIM] Intentando fetch /services.json');
-          let res = await fetch('/services.json', { cache: 'no-store' });
-          console.log('[SHIM] /services.json status:', res.status);
-            
-            if(res.ok) {
-              const data = await res.json();
-              console.log('[SHIM] Datos cargados:', data);
-              if (Array.isArray(data) && data.length > 0) {
-                servicesList = data;
-              } else {
-                console.log('[SHIM] Datos vacíos o no array');
-                window.__neutralino_push_log && window.__neutralino_push_log({ timestamp: Date.now(), level: 'WARNING', message: 'services.json vacío o inválido; usando fallback' });
-              }
-            } else {
-              console.log('[SHIM] HTTP error:', res.status);
-              window.__neutralino_push_log && window.__neutralino_push_log({ timestamp: Date.now(), level: 'WARNING', message: `No se pudo cargar services.json (HTTP ${res.status}); usando fallback` });
-            }
-          }
-        }catch(e){
-          console.log('[SHIM] Error cargando services.json:', e.message);
-          window.__neutralino_push_log && window.__neutralino_push_log({ timestamp: Date.now(), level: 'WARNING', message: `Error cargando services.json: ${e.message}; usando fallback` });
-        }
-
-        // Fallback con todos los servicios
-        if(servicesList.length === 0) {
-          console.log('[SHIM] Usando fallback con todos los servicios');
+        // Cargar configuración de servicios
+        console.log('[SHIM] Cargando services.json...');
+        let servicesList = await loadServicesConfig();
+        console.log('[SHIM] services.json cargado. Cantidad:', servicesList?.length);
+        
+        if (!Array.isArray(servicesList) || servicesList.length === 0) {
+          console.warn('[SHIM] Fallback interno activado');
           servicesList = [
-            { "name": "Apache", "type": "apache", "version": "2.4" },
-            { "name": "Nginx", "type": "nginx", "version": "1.22" },
-            { "name": "MySQL", "type": "mysql", "version": "8.0" },
-            { "name": "PostgreSQL", "type": "postgresql", "version": "14" },
-            { "name": "MongoDB", "type": "mongodb", "version": "6.0" },
-            { "name": "Redis", "type": "redis", "version": "7.0" },
-            { "name": "Memcached", "type": "memcached", "version": "1.6" },
-            { "name": "MailPit", "type": "mailpit", "version": "1.8" }
+            { "id": "php", "name": "PHP", "type": "php", "version": "8.2", "port": null, "processName": "php.exe" },
+            { "id": "apache", "name": "Apache", "type": "apache", "version": "2.4", "port": 80, "processName": "httpd.exe" },
+            { "id": "mysql", "name": "MySQL", "type": "mysql", "version": "8.0", "port": 3306, "processName": "mysqld.exe" },
+            { "id": "nginx", "name": "Nginx", "type": "nginx", "version": "1.22", "port": 80, "processName": "nginx.exe" },
+            { "id": "mailpit", "name": "MailPit", "type": "mailpit", "version": "1.8", "port": 8025, "processName": "mailpit.exe" }
           ];
         }
 
-        // Ejecutar netstat UNA SOLA VEZ
-        console.log('[SHIM] Ejecutando netstat una sola vez...');
+        // Ejecutar netstat una vez (con caché)
+        console.log('[SHIM] Refrescando Netstat...');
         await getNetstatData();
         
-        // Filtrar servicios visibles (no ocultos)
-        const visibleServices = servicesList.filter(s => !hiddenServices || !hiddenServices.includes(s.name));
-        console.log('[SHIM] Total:', servicesList.length, 'servicios | Visibles:', visibleServices.length, '| Ocultos:', servicesList.length - visibleServices.length);
+        // Filtrar servicios visibles
+        const hiddenArray = Array.isArray(hiddenServices) ? hiddenServices : [];
+        const visibleServices = servicesList.filter(s => !hiddenArray.includes(s.name));
         
-        // Verificar estado SOLO de servicios visibles EN SECUENCIA
-        const servicesWithStatus = [];
-        for(const service of visibleServices){
-          const status = await checkServiceStatus(service, laragonPath);
-          servicesWithStatus.push({ ...service, ...status });
-        }
-        
-        // Agregar servicios ocultos sin verificar estado (solo con datos básicos)
-        if(hiddenServices && hiddenServices.length > 0){
-          for(const service of servicesList){
-            if(hiddenServices.includes(service.name)){
-              servicesWithStatus.push({ ...service, status: 'hidden', details: 'Servicio oculto' });
+        console.log(`[SHIM] Mapeando ${visibleServices.length} servicios visibles...`);
+
+        let completed = 0;
+        const results = await Promise.all(visibleServices.map(async (service) => {
+          try {
+            const svcStart = Date.now();
+            console.log(`[SHIM] [${service.name}] Iniciando chequeo...`);
+            
+            const status = await checkServiceStatus(service, basePath);
+            const enriched = { ...service, ...status };
+
+            const type = (service.type || service.id || '').toLowerCase();
+            const exeMap = {
+              'apache': 'httpd.exe', 'nginx': 'nginx.exe', 'mysql': 'mysqld.exe',
+              'mariadb': 'mysqld.exe', 'postgresql': 'postgres.exe', 'redis': 'redis-server.exe',
+              'memcached': 'memcached.exe', 'mailpit': 'mailpit.exe', 'mongodb': 'mongod.exe', 'php': 'php.exe'
+            };
+
+            const mainExe = exeMap[type];
+            if (mainExe) {
+              console.log(`[SHIM] [${service.name}] Buscando versiones para ${type}...`);
+              enriched.availableVersions = await getAvailableVersions(basePath, type);
+              
+              let version = service.version;
+              if (version && enriched.availableVersions.length > 0 && !enriched.availableVersions.includes(version)) {
+                const match = enriched.availableVersions.find(v => v.startsWith(version));
+                version = match || enriched.availableVersions[0];
+              } else if (!version) {
+                version = enriched.availableVersions.length > 0 ? enriched.availableVersions[0] : null;
+              }
+              
+              enriched.version = version;
+              if (version) {
+                console.log(`[SHIM] [${service.name}] Buscando ejecutable ${mainExe} v${version}...`);
+                const binPath = await findExecutable(type, version, mainExe, basePath);
+                enriched.isInstalled = binPath !== null;
+              } else {
+                enriched.isInstalled = false;
+              }
             }
+            completed++;
+            console.log(`[SHIM] [${service.name}] Finalizado en ${Date.now() - svcStart}ms (${completed}/${visibleServices.length})`);
+            return enriched;
+          } catch (e) {
+            console.error(`[SHIM] [${service.name}] ERROR:`, e);
+            return { ...service, status: 'error', details: e.message };
+          }
+        }));
+
+        console.log('[SHIM] Enriqueciendo Apache con PHP...');
+        let phpVersions = await getAvailableVersions(basePath, 'php');
+        let phpBin = null;
+        for (const v of phpVersions) {
+          const bin = await findExecutable('php', v, 'php.exe', basePath);
+          if (bin) { phpBin = bin; break; }
+        }
+
+        for(const svc of results){
+          if(svc && (svc.type === 'apache' || svc.name === 'Apache')){
+            svc.requiresPhp = true;
+            svc.dependenciesReady = svc.isInstalled && !!phpBin;
+            svc.availablePhpVersions = phpVersions;
           }
         }
+        
+        // Agregar ocultos
+        hiddenArray.forEach(name => {
+          const s = servicesList.find(x => x.name === name);
+          if(s) results.push({ ...s, status: 'hidden' });
+        });
 
-        console.log('[SHIM] Servicios con estado:', servicesWithStatus);
-
-        // Si por alguna razón el resultado es vacío, retornar fallback básico
-        if (!Array.isArray(servicesWithStatus) || servicesWithStatus.length === 0) {
-          console.log('[SHIM] Resultado vacío, retornando fallback final');
-          window.__neutralino_push_log && window.__neutralino_push_log({ timestamp: Date.now(), level: 'WARNING', message: 'No se detectaron servicios; retornando fallback' });
-          return [
-            { name: 'Apache', type: 'apache', status: 'unknown' },
-            { name: 'MySQL', type: 'mysql', status: 'unknown' }
-          ];
-        }
-
-        console.log('[SHIM] Retornando', servicesWithStatus.length, 'servicios');
-        return servicesWithStatus;
+        console.log(`[SHIM] <<< getServices FIN (Total: ${Date.now() - startTime}ms, Items: ${results.length})`);
+        return results;
       }catch(e){
-        console.error('[SHIM] Error getting services:', e);
-        window.__neutralino_push_log && window.__neutralino_push_log({ timestamp: Date.now(), level: 'ERROR', message: `Error obteniendo servicios: ${e.message}` });
-        // Nunca retornar lista vacía: garantizar mínimo
-        console.log('[SHIM] Retornando fallback por error');
+        console.error('[SHIM] !!! ERROR FATAL getServices:', e);
         return [
-          { name: 'Apache', type: 'apache', status: 'unknown' },
-          { name: 'MySQL', type: 'mysql', status: 'unknown' }
+          { id: 'apache', name: 'Apache', type: 'apache', status: 'error', details: e.message },
+          { id: 'mysql', name: 'MySQL', type: 'mysql', status: 'error', details: e.message }
         ];
       }
     },
     startService: async (serviceName)=>{
-      console.log('[SHIM] startService llamado para:', serviceName);
+      console.log('[SHIM] ============ startService INICIO ============');
+      console.log('[SHIM] Servicio solicitado:', serviceName);
       try{
         const cfgRaw = localStorage.getItem('WebServDev-config');
+        console.log('[SHIM] Config raw:', cfgRaw);
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
-        const laragonPath = cfg.laragonPath || defaultConfig.laragonPath;
-        console.log('[SHIM] Laragon path:', laragonPath);
+        const basePath = cfg.basePath || defaultConfig.basePath || neutralinoRoot;
+        console.log('[SHIM] Base path determinado:', basePath);
+        console.log('[SHIM] neutralinoRoot:', neutralinoRoot);
         
-        // Cargar configuración de servicios para obtener info del servicio (sin verificar estado)
-        let servicesList = [];
-        try{
-          const isProd = window.NL_TOKEN && window.Neutralino;
-          if(isProd && Neutralino.filesystem && Neutralino.filesystem.readFile){
-            console.log('[SHIM] Modo PROD - leyendo services.json con filesystem');
-            const content = await Neutralino.filesystem.readFile('./www/services.json');
-            const data = JSON.parse(content);
-            if (Array.isArray(data) && data.length > 0) {
-              servicesList = data;
-              console.log('[SHIM] Servicios cargados:', servicesList.length);
-            }
-          }else{
-            console.log('[SHIM] Cargando services.json con fetch...');
-            let res = await fetch('/neutralino/services.json', { cache: 'no-store' });
-            if (!res.ok) {
-              res = await fetch('/services.json', { cache: 'no-store' });
-            }
-            if(res.ok) {
-              const data = await res.json();
-              if (Array.isArray(data) && data.length > 0) {
-                servicesList = data;
-                console.log('[SHIM] Servicios cargados:', servicesList.length);
-              }
-            }
-          }
-        }catch(e){
-          console.log('[SHIM] Error cargando services.json:', e.message);
-        }
+        // Cargar configuración de servicios
+        const servicesList = await loadServicesConfig();
         
         const service = servicesList.find(s => s.name === serviceName);
         if(!service){
-          throw new Error(`Servicio no encontrado: ${serviceName}`);
+          const errorMsg = servicesList.length === 0 
+            ? `Error interno: configuración de servicios no cargada. Reinicie la aplicación.`
+            : `Servicio '${serviceName}' no encontrado en la configuración.`;
+          console.error('[SHIM] ERROR:', errorMsg);
+          throw new Error(errorMsg);
         }
         console.log('[SHIM] Servicio encontrado:', service);
         
-        const type = service.type.toLowerCase();
+        const type = (service.type || service.id || service.name || '').toLowerCase();
         const version = service.version || '';
         console.log('[SHIM] Tipo:', type, '| Versión:', version || '(default)');
         
@@ -553,7 +704,8 @@
           'redis': 'redis-server.exe',
           'memcached': 'memcached.exe',
           'mailpit': 'mailpit.exe',
-          'mongodb': 'mongod.exe'
+          'mongodb': 'mongod.exe',
+          'php': 'php.exe'
         };
         
         const exe = exeMap[type];
@@ -563,12 +715,35 @@
         console.log('[SHIM] Ejecutable objetivo:', exe);
         
         // Localizar el ejecutable real
-        console.log('[SHIM] Buscando ejecutable en:', `${laragonPath}\\bin\\${type}`);
-        const fullExe = await findExecutable(type, version, exe, laragonPath);
+        console.log('[SHIM] ============ BÚSQUEDA DE EJECUTABLE ============');
+        console.log('[SHIM] Buscando:', exe, 'para tipo:', type, 'versión:', version);
+        console.log('[SHIM] Raíz de búsqueda:', basePath);
+        const fullExe = await findExecutable(type, version, exe, basePath);
+        console.log('[SHIM] Resultado búsqueda:', fullExe);
         if(!fullExe){
-          throw new Error(`No se encontró el ejecutable para ${type} en ${laragonPath}\\\\bin\\\\${type}`);
+          const errorMsg = `No se encontró el ejecutable para ${type} en ${basePath}\\bin\\${type}`;
+          console.error('[SHIM] ERROR:', errorMsg);
+          throw new Error(errorMsg);
         }
-        console.log('[SHIM] Ejecutable encontrado:', fullExe);
+        console.log('[SHIM] ✓ Ejecutable encontrado:', fullExe);
+
+        // Dependencias: Apache requiere PHP
+        if(type === 'apache'){
+          console.log('[SHIM] ============ VERIFICACIÓN PHP ============');
+          const phpBin = await findExecutable('php', '', 'php.exe', basePath);
+          console.log('[SHIM] PHP encontrado:', phpBin);
+          if(!phpBin){
+            const errorMsg = 'Apache requiere PHP instalado (php.exe no encontrado)';
+            console.error('[SHIM] ERROR:', errorMsg);
+            window.__neutralino_push_log && window.__neutralino_push_log({ 
+              timestamp: Date.now(), 
+              level: 'ERROR', 
+              message: errorMsg
+            });
+            throw new Error(errorMsg);
+          }
+          console.log('[SHIM] ✓ PHP verificado:', phpBin);
+        }
         
         window.__neutralino_push_log && window.__neutralino_push_log({ 
           timestamp: Date.now(), 
@@ -587,10 +762,17 @@
         
         // Iniciar el servicio según su tipo
         let startCmd = '';
+        let isBackground = false;
         switch(type){
           case 'apache':{
-            const conf = `${laragonPath}\\\\bin\\\\apache\\\\${version}\\\\conf\\\\httpd.conf`;
-            startCmd = `start /B "" "${fullExe}" -f "${conf}"`;
+            // Basar la ruta en la ubicación real del ejecutable (para soportar carpetas tipo Apache24, httpd-2.4.x, etc.)
+            const exeDir = fullExe.replace(/\\[^\\]+$/, '');
+            const apacheRoot = exeDir.toLowerCase().endsWith('\\bin') ? exeDir.replace(/\\bin$/, '') : exeDir;
+            const conf = `${apacheRoot}\\conf\\httpd.conf`;
+            // Usar PowerShell Start-Process para background, más robusto que cmd /C start
+            // -WindowStyle Hidden: sin ventana, -PassThru: devuelve el objeto proceso
+            startCmd = `powershell -Command "Start-Process -FilePath '${fullExe}' -ArgumentList '-f','${conf}','-d','${apacheRoot}' -WindowStyle Hidden -PassThru | Select-Object -ExpandProperty Id"`;
+            isBackground = true;
             break;
           }
           case 'nginx':{
@@ -603,12 +785,12 @@
             break;
           }
           case 'redis':{
-            const redisConf = `${laragonPath}\\\\bin\\\\redis\\\\${version}\\\\redis.conf`;
+            const redisConf = `${basePath}\\\\bin\\\\redis\\\\${version}\\\\redis.conf`;
             startCmd = `start /B "" "${fullExe}" "${redisConf}"`;
             break;
           }
           case 'mongodb':{
-            const mongoData = `${laragonPath}\\\\data\\\\mongodb`;
+            const mongoData = `${basePath}\\\\data\\\\mongodb`;
             startCmd = `start /B "" "${fullExe}" --dbpath "${mongoData}"`;
             break;
           }
@@ -619,9 +801,28 @@
         }
         
         // Ejecutar comando
-        console.log('[SHIM] Ejecutando comando de inicio:', startCmd);
-        await execCommand(`cmd /C ${startCmd}`);
-        console.log('[SHIM] Comando ejecutado, invalidando caché netstat');
+        console.log('[SHIM] ============ EJECUCIÓN ============');
+        console.log('[SHIM] Tipo servicio:', type);
+        console.log('[SHIM] Comando completo:', startCmd);
+        console.log('[SHIM] Es background:', isBackground);
+        console.log('[SHIM] Ejecutando...');
+        const result = await execCommand(startCmd);
+        console.log('[SHIM] ============ RESULTADO ============');
+        console.log('[SHIM] stdout:', result?.stdout || '(vacío)');
+        console.log('[SHIM] stderr:', result?.stderr || '(vacío)');
+        console.log('[SHIM] exitCode:', result?.exitCode);
+        
+        // Si hay stderr y no es background, es probable error
+        if(result?.stderr && !isBackground){
+          console.error('[SHIM] ERROR en ejecución:', result.stderr);
+          throw new Error(`Error al iniciar ${name}: ${result.stderr}`);
+        }
+        
+        // Si es Apache y devuelve PID, guardarlo
+        if(type === 'apache' && result?.stdout){
+          const pid = result.stdout.trim();
+          console.log('[SHIM] Apache iniciado con PID:', pid);
+        }
         
         // Invalidar caché de netstat porque el puerto puede estar en transición
         invalidateNetstatCache();
@@ -632,7 +833,8 @@
           message: `${serviceName} iniciado correctamente` 
         });
         
-        console.log('[SHIM] Servicio', serviceName, 'iniciado exitosamente');
+        console.log('[SHIM] ✓ Servicio', serviceName, 'iniciado exitosamente');
+        console.log('[SHIM] ============ startService FIN ============');
         return { success: true, message: `${serviceName} started` };
       }catch(e){
         const errorMsg = e.message || String(e);
@@ -649,38 +851,17 @@
       try{
         const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
-        const laragonPath = cfg.laragonPath || defaultConfig.laragonPath;
+        const basePath = cfg.basePath || defaultConfig.basePath;
         
-        // Cargar configuración de servicios para obtener info del servicio (sin verificar estado)
-        let servicesList = [];
-        try{
-          const isProd = window.NL_TOKEN && window.Neutralino;
-          if(isProd && Neutralino.filesystem && Neutralino.filesystem.readFile){
-            const content = await Neutralino.filesystem.readFile('./www/services.json');
-            const data = JSON.parse(content);
-            if (Array.isArray(data) && data.length > 0) {
-              servicesList = data;
-            }
-          }else{
-            let res = await fetch('/neutralino/services.json', { cache: 'no-store' });
-            if (!res.ok) {
-              res = await fetch('/services.json', { cache: 'no-store' });
-            }
-            if(res.ok) {
-              const data = await res.json();
-              if (Array.isArray(data) && data.length > 0) {
-                servicesList = data;
-              }
-            }
-          }
-        }catch(e){}
+        // Cargar configuración de servicios
+        const servicesList = await loadServicesConfig();
         
         const service = servicesList.find(s => s.name === serviceName);
         if(!service){
           throw new Error(`Servicio no encontrado: ${serviceName}`);
         }
         
-        const type = service.type.toLowerCase();
+        const type = (service.type || service.id || service.name || '').toLowerCase();
         const version = service.version || '';
         
         const exeMap = {
@@ -706,12 +887,12 @@
         });
         
         // Intentar detener de forma elegante primero
-        const fullExe = await findExecutable(type, version, exe, laragonPath);
+        const fullExe = await findExecutable(type, version, exe, basePath);
         
         switch(type){
           case 'apache':{
             if(fullExe){
-              const conf = `${laragonPath}\\\\bin\\\\apache\\\\${version}\\\\conf\\\\httpd.conf`;
+              const conf = `${basePath}\\\\bin\\\\apache\\\\${version}\\\\conf\\\\httpd.conf`;
               try{
                 await execCommand(`cmd /C "${fullExe}" -k stop -f "${conf}"`);
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -769,7 +950,7 @@
         const raw = localStorage.getItem('WebServDev-config');
         const cfg = raw ? JSON.parse(raw) : defaultConfig;
         // Forzar siempre el appPath actual para evitar que "C:\App" se quede pegado
-        cfg.appPath = neutralinoRoot;
+        cfg.appPath = appRoot;
         return cfg;
       }catch(e){ return defaultConfig; }
     },
@@ -819,7 +1000,7 @@
     },
     openDocumentRoot: async () => {
       try {
-        const cfgRaw = localStorage.getItem('myApp-config');
+        const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
         await execCommand(`explorer "${cfg.projectsPath || defaultConfig.projectsPath}"`);
       } catch(e) { console.error(e); }
@@ -828,23 +1009,136 @@
       console.warn('[SHIM] openDevTools no es soportado nativamente en Neutralino desde JS para el usuario.');
     },
     getRemoteServices: async () => {
-      try {
-        const res = await fetch('/services.json');
-        if (res.ok) return await res.json();
-      } catch(e) { console.error(e); }
-      return { services: [] };
+      console.log('[SHIM] getRemoteServices iniciando...');
+      const services = await loadServicesConfig();
+      if (services.length > 0) {
+        return { services };
+      }
+      
+      // Fallback si falla todo
+      return { 
+        services: [
+          { "id": "php", "name": "PHP", "versions": [] },
+          { "id": "apache", "name": "Apache", "versions": [] }
+        ]
+      };
     },
     installService: async (data) => {
-      console.error('[SHIM] installService no implementado en shim de Neutralino aún. Use la versión Electron para instalaciones.');
-      return { success: false, error: 'Operación no soportada en este entorno.' };
+      console.log('[SHIM] ============ installService INICIO ============');
+      console.log('[SHIM] Datos recibidos:', data);
+      window.__is_installing = true;
+      
+      try {
+        let service, zipUrl;
+        
+        if (data.service && data.zipUrl) {
+          service = data.service;
+          zipUrl = data.zipUrl;
+        } else if (data.url && data.serviceId) {
+          zipUrl = data.url;
+          service = {
+            name: data.serviceId.toUpperCase(),
+            type: data.serviceId.toLowerCase(),
+            version: data.version,
+            installPath: data.installPath
+          };
+        } else {
+          throw new Error('Faltan parámetros de instalación');
+        }
+
+        const cfgRaw = localStorage.getItem('WebServDev-config');
+        const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
+        const basePath = (cfg.basePath || defaultConfig.basePath || neutralinoRoot).replace(/\//g, '\\');
+
+        // Limpiar solo caracteres verdaderamente Prohibidos en Windows: < > : " / \ | ? *
+        const cleanVersion = service.version.replace(/[<>:"\/\\|?*]/g, '_').trim();
+        const destDir = `${basePath}\\neutralino\\bin\\${service.type}\\${cleanVersion}`.replace(/\\\\/g, '\\');
+        const tmpDir = `${basePath}\\tmp`.replace(/\\\\/g, '\\');
+        const tmpZipPath = `${tmpDir}\\${service.type}-${cleanVersion}.zip`.replace(/\\\\/g, '\\').replace(/\s+/g, '_');
+
+        console.log('[SHIM] Instalando:', service.name, 'v', service.version);
+        console.log('[SHIM] Destino Final:', destDir);
+        
+        window.__neutralino_push_log && window.__neutralino_push_log({ 
+          timestamp: Date.now(), level: 'INFO', 
+          message: `Iniciando instalación de ${service.name} ${service.version}...` 
+        });
+
+        await execCommand(`cmd /C if not exist "${tmpDir}" mkdir "${tmpDir}"`);
+        await execCommand(`cmd /C if not exist "${destDir}" mkdir "${destDir}"`);
+
+        // Prioridad PowerShell para Windows
+        let downloadSuccess = false;
+        let lastError = '';
+
+        console.log('[SHIM] Intentando descarga con PowerShell...');
+        try {
+          const psDownloadCmd = `powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; iwr -Uri '${zipUrl}' -OutFile '${tmpZipPath}' -TimeoutSec 300"`;
+          const psRes = await execCommand(psDownloadCmd);
+          if (psRes.exitCode === 0) {
+            downloadSuccess = true;
+          } else {
+            lastError = psRes.stderr;
+          }
+        } catch (e) {
+          lastError = e.message;
+        }
+
+        if (!downloadSuccess) {
+          console.log('[SHIM] Fallback a curl...');
+          try {
+            const curlRes = await execCommand(`curl -L "${zipUrl}" -o "${tmpZipPath}" --fail --silent --show-error --connect-timeout 30`);
+            if (curlRes.exitCode === 0) {
+              downloadSuccess = true;
+            } else {
+              lastError = curlRes.stderr || `Code ${curlRes.exitCode}`;
+            }
+          } catch (e) {
+            lastError = e.message;
+          }
+        }
+
+        if (!downloadSuccess) throw new Error(`Error de descarga: ${lastError}`);
+
+        window.__neutralino_push_log && window.__neutralino_push_log({ 
+          timestamp: Date.now(), level: 'INFO', 
+          message: `Extrayendo archivos...` 
+        });
+
+        console.log('[SHIM] Extrayendo...');
+        const extractRes = await execCommand(`powershell -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '${tmpZipPath}' -DestinationPath '${destDir}' -Force"`);
+
+        if (extractRes.exitCode !== 0) {
+          const tarRes = await execCommand(`tar -xf "${tmpZipPath}" -C "${destDir}"`);
+          if (tarRes.exitCode !== 0) throw new Error(`Error extracción: ${extractRes.stderr || tarRes.stderr}`);
+        }
+
+        try { await execCommand(`cmd /C del "${tmpZipPath}"`); } catch(e) {}
+
+        window.__neutralino_push_log && window.__neutralino_push_log({ 
+          timestamp: Date.now(), level: 'SUCCESS', 
+          message: `${service.name} v${service.version} instalado correctamente.` 
+        });
+
+        console.log('[SHIM] Instalación finalizada');
+        return { success: true, message: `${service.name} instalado` };
+      } catch (e) {
+        console.error('[SHIM] Error:', e);
+        window.__neutralino_push_log && window.__neutralino_push_log({ 
+          timestamp: Date.now(), level: 'ERROR', message: `Fallo: ${e.message}` 
+        });
+        return { success: false, message: e.message };
+      } finally {
+        window.__is_installing = false;
+      }
     },
     updateServiceVersion: async (type, version) => {
       try {
-        const cfgRaw = localStorage.getItem('myApp-config');
+        const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
         if (!cfg.versions) cfg.versions = {};
         cfg.versions[type] = version;
-        localStorage.setItem('myApp-config', JSON.stringify(cfg));
+        localStorage.setItem('WebServDev-config', JSON.stringify(cfg));
         return { success: true };
       } catch(e) { return { success: false, message: e.message }; }
     },

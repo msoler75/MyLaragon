@@ -52,8 +52,16 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
     }
   };
   
-  const visibleServices = services.filter(s => !hiddenServices.includes(s.name));
-  const hiddenList = services.filter(s => hiddenServices.includes(s.name));
+  console.log('[VIEW] Render ServicesView', { 
+    servicesCount: services?.length, 
+    hiddenCount: hiddenServices?.length,
+    loading 
+  });
+
+  const visibleServices = Array.isArray(services) ? services.filter(s => !hiddenServices.includes(s.name)) : [];
+  console.log('[VIEW] visibleServices:', visibleServices.length);
+  
+  const hiddenList = Array.isArray(services) ? services.filter(s => hiddenServices.includes(s.name)) : [];
   
   const canStartAll = visibleServices.some(s => s.status !== 'running');
   const canStopAll = visibleServices.some(s => s.status === 'running');
@@ -132,6 +140,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
           const isProcessing = processingServices.includes(service.name);
           const isRunning = service.status === 'running';
           const isPortOccupied = service.status === 'port-occupied';
+          const depsMissing = service.requiresPhp && service.dependenciesReady === false;
           
           return (
             <div key={service.name} className={`group rounded-2xl shadow-sm border p-4 transition-all duration-300 relative flex flex-col h-full ${
@@ -288,7 +297,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                   {getServiceIcon(service.type)}
                 </div>
                 <div className="overflow-hidden flex-1">
-                  <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : !service.isInstalled ? 'text-app-danger' : isPortOccupied ? 'text-app-warning' : 'text-app-text'}`}>{service.name}</h3>
+                  <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : (!service.isInstalled || depsMissing) ? 'text-app-danger' : isPortOccupied ? 'text-app-warning' : 'text-app-text'}`}>{service.name}</h3>
                   <div className="flex items-center space-x-1.5">
                     <span className={`rounded-full transition-all duration-500 ${
                       isProcessing 
@@ -301,8 +310,18 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                             ? 'h-2.5 w-2.5 bg-app-warning animate-pulse shadow-[0_0_8px_rgba(249,115,22,0.8)]'
                             : 'h-2 w-2 bg-app-text-muted'
                     }`}></span>
-                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isRunning ? 'text-app-success/80' : !service.isInstalled ? 'text-app-danger/80' : isPortOccupied ? 'text-app-warning/80' : 'text-app-text-muted'}`}>
-                      {isProcessing ? t.processing : !service.isInstalled ? (t.notInstalled || 'NO INSTALADO') : isRunning ? t.online : isPortOccupied ? (t.portOccupied || 'PUERTO OCUPADO') : t.offline}
+                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isRunning ? 'text-app-success/80' : (!service.isInstalled || depsMissing) ? 'text-app-danger/80' : isPortOccupied ? 'text-app-warning/80' : 'text-app-text-muted'}`}>
+                      {isProcessing
+                        ? t.processing
+                        : !service.isInstalled
+                          ? (t.notInstalled || 'NO INSTALADO')
+                          : depsMissing
+                            ? (t.phpRequired || 'REQUIERE PHP')
+                            : isRunning
+                              ? t.online
+                              : isPortOccupied
+                                ? (t.portOccupied || 'PUERTO OCUPADO')
+                                : t.offline}
                     </span>
                   </div>
                 </div>
@@ -415,7 +434,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
               <button
                 disabled={isProcessing}
                 onClick={() => {
-                  if (!service.isInstalled) {
+                  if (!service.isInstalled || depsMissing) {
                     window.dispatchEvent(new CustomEvent('change-tab', { detail: 'install' }));
                     return;
                   }
@@ -426,6 +445,8 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                     ? 'bg-app-bg text-app-text-muted border-app-border cursor-not-allowed translate-y-1 border-b-0 opacity-60'
                     : !service.isInstalled
                       ? 'bg-app-warning/10 text-app-warning border-app-warning/30 hover:bg-app-warning hover:text-white hover:border-app-warning'
+                    : depsMissing
+                      ? 'bg-app-warning/10 text-app-warning border-app-warning/30 hover:bg-app-warning hover:text-white hover:border-app-warning'
                       : service.status === 'running'
                         ? 'bg-app-danger/10 text-app-danger border-app-danger/30 hover:bg-app-danger hover:text-white hover:border-app-danger'
                         : 'bg-app-primary text-white border-app-primary/50 hover:bg-app-primary/90 shadow-lg shadow-app-primary/10'
@@ -435,6 +456,8 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                   <><RefreshCw size={14} className="animate-spin" /><span>{t.wait}</span></>
                 ) : !service.isInstalled ? (
                   <><Layers size={14} /><span>{t.install || 'INSTALAR'}</span></>
+                ) : depsMissing ? (
+                  <><Layers size={14} /><span>{t.installPhp || 'INSTALAR PHP'}</span></>
                 ) : service.status === 'running' ? (
                   <><Square size={14} fill="currentColor" /><span>{t.stop}</span></>
                 ) : (
@@ -450,24 +473,20 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
             <div className="bg-app-primary/10 p-8 rounded-full mb-6 group-hover:scale-110 group-hover:rotate-6 transition-all duration-500">
               <Server size={48} className="text-app-primary/50" />
             </div>
-            <h3 className="text-lg font-black text-app-text uppercase tracking-tight mb-2">{t.noServicesInstalled}</h3>
+            <h3 className="text-lg font-black text-app-text uppercase tracking-tight mb-2">
+              {services.length === 0 ? "NO SE DETECTARON SERVICIOS" : (t.noServicesInstalled || "No hay servicios visibles")}
+            </h3>
             <p className="text-xs font-bold text-app-text-muted uppercase tracking-widest max-w-sm text-center px-6 leading-relaxed mb-8">
-              {t.noServicesConfigured}
+              {services.length === 0 
+                ? "El archivo services.json está vacío o no se pudo cargar. Revisa los logs en la pestaña Registro." 
+                : (t.noServicesConfigured || "Todos los servicios están ocultos.")}
             </p>
             <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
               <button 
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent('change-tab', { detail: 'install' }));
-                }}
+                onClick={() => loadServices()}
                 className="px-8 py-3 bg-app-primary text-app-primary-text rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-app-primary/20 hover:-translate-y-1 transition-all"
               >
-                Ir a Instalador
-              </button>
-              <button 
-                onClick={() => loadServices()}
-                className="px-8 py-3 bg-app-surface border border-app-border text-app-text rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-app-bg transition-all"
-              >
-                Actualizar lista
+                Reintentar Carga
               </button>
             </div>
           </div>

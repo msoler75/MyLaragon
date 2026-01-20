@@ -1,5 +1,0 @@
-[
-  { "name": "Apache", "type": "apache", "version": "2.4" },
-  { "name": "MySQL", "type": "mysql", "version": "8.0" },
-  { "name": "Nginx", "type": "nginx", "version": "1.22" }
-]
