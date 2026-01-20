@@ -24,13 +24,20 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
      b) Enviar al canal de depuración nativo.
      c) Notificar a la UI (`LogsView.jsx`) vía `window.__neutralino_push_log`.
 
-4. **Integración de Servicios**:
+4. **Autonomía y Resolución vía Logs**:
+   - Los logs son la fuente primaria de consulta. Antes de pedir ayuda o aclaraciones al usuario tras una ejecución, revisa `app-debug.log` o la salida de terminal.
+   - Debes ser capaz de identificar qué pasos fallaron y por qué (ej. falta de permisos, binario corrupto, puerto ocupado) a través de los logs.
+   - **Instrumentación Proactiva**: Si los logs existentes no son lo suficientemente descriptivos para resolver un bug, es TU responsabilidad inyectar nuevos mensajes de log (`console.log/warn/error`) con información técnica precisa (variables de entorno, rutas resueltas, códigos de error crudos) para triangular el origen del problema.
+   - Corrige los errores detectados de forma autónoma; solo contacta al usuario si el problema requiere una decisión de negocio o una intervención física externa.
+
+5. **Integración de Servicios**:
    - La definición de servicios instalables está en `services.json`.
    - La detección de binarios debe seguir el patrón de búsqueda en `bin/<tipo>/<versión>/<ejecutable>`.
 
 ## Workflows Comunes
 - **Fix Duplication**: Ejecutar `node scripts/create-symlinks.js`.
 - **Detección de Servicios**: Revisar `electron/services-detector.js` para lógica de puertos y `neutralino/neutralino-shim.js` para ejecución de comandos.
+- **Debugging Proactivo**: Si una prueba o comando falla, lee las últimas 50 líneas de `app-debug.log` antes de proponer cambios.
 - **Testing**: Usa `vitest` para lógica pura y `npm run test` para integración (activa `RUN_SLOW=1` para testear con binarios reales).
 
 ## Convenciones de Código
