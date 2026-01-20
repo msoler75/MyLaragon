@@ -54,6 +54,23 @@ Para trabajar específicamente con el runtime ligero:
 
 ---
 
+## Flujo de Datos y APIs
+El proyecto utiliza un sistema de "Shim" (`neutralino-shim.js`) para unificar las APIs de Neutralino y Electron, permitiendo que el mismo código frontend funcione en ambos entornos y en el navegador durante el desarrollo.
+
+### Sistema de Logs y Telemetría
+WebServDev implementa un mecanismo de logging persistente y en tiempo real con tres niveles de salida:
+
+1.  **Persistencia Local**: En producción, todos los logs se guardan en `app-debug.log` en el directorio raíz. Se utiliza el modo "append" para conservar el historial entre sesiones.
+2.  **Depuración Nativa**: Los mensajes se envían al canal de depuración del sistema operativo mediante `Neutralino.debug.log`.
+3.  **Visualización en UI**: Se interceptan los métodos globales `console.log/warn/error` para redirigir el flujo a `LogsView.jsx` mediante un puente de eventos (`onLog`).
+4.  **Telemetría de Instalación**: Durante la descarga e instalación de servicios desde el Marketplace (remoto), el sistema genera logs detallados del progreso (descarga, extracción, configuración) que se emiten en tiempo real a la interfaz.
+
+### Modo Desarrollo vs. Producción
+*   **Producción**: Utiliza binarios nativos y las APIs directas de Neutralino (`filesystem`, `os.execCommand`).
+*   **Desarrollo (Vite)**: Dado que el navegador no tiene acceso al sistema de archivos, el Shim detecta la ausencia de `NL_TOKEN` y redirige las llamadas (como ejecución de comandos o chequeo de archivos) a un **Proxy API** integrado en `vite.config.js`. Esto emula el comportamiento nativo usando Node.js en el backend.
+
+---
+
 ##  Pruebas y Calidad
 - **Vitest** es el framework de pruebas.
 - Se recomienda ejecutar 'RUN_SLOW=1 npm test' periódicamente para verificar la integración con binarios reales del sistema.
