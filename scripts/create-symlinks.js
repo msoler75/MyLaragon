@@ -1,6 +1,6 @@
 /**
- * Script de Sincronización de Recursos (Source -> Copy)
- * Mantiene la Fuente Única de Verdad en src/neutralino y genera las copias para www.
+ * Script de Sincronizaciï¿½n de Recursos (Source -> Copy)
+ * Mantiene la Fuente ï¿½nica de Verdad en src/neutralino y genera las copias para www.
  */
 
 import fs from "fs";
@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.join(__dirname, "..");
 
-// Configuración de sincronización
+// Configuraciï¿½n de sincronizaciï¿½n
 const syncConfig = [
   {
     source: "src/neutralino/neutralino.js",
@@ -86,7 +86,7 @@ function main() {
   });
 
   console.log("".repeat(50));
-  console.log(`\n Sincronización completada: \${successCount} archivos preparados.\n`);
+  console.log(`\n Sincronizaciï¿½n completada: \${successCount} archivos preparados.\n`);
 }
 
 main();
