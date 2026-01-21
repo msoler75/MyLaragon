@@ -1,6 +1,20 @@
 import fs from 'fs';
 import path from 'path';
 
+const exeMap = {
+  apache: 'httpd.exe',
+  nginx: 'nginx.exe',
+  mysql: 'mysqld.exe',
+  mariadb: 'mysqld.exe',
+  redis: 'redis-server.exe',
+  memcached: 'memcached.exe',
+  mailpit: 'mailpit.exe',
+  mongodb: 'mongod.exe',
+  postgresql: 'postgres.exe',
+  postgres: 'postgres.exe',
+  php: 'php.exe'
+};
+
 // Leer configuración de App.ini en una ruta dada
 export function loadAppConfig(appPath, log = () => {}) {
   const possiblePaths = [
@@ -49,19 +63,6 @@ export function getServiceBinPath(appPath, type, version, log = () => {}) {
   // Permitir instalaciones en appPath, usr/ y neutralino/ (portable)
   const baseRoots = [appPath, path.join(appPath, 'usr'), path.join(appPath, 'neutralino')];
 
-  const exeMap = {
-    apache: 'httpd.exe',
-    nginx: 'nginx.exe',
-    mysql: 'mysqld.exe',
-    mariadb: 'mysqld.exe',
-    redis: 'redis-server.exe',
-    memcached: 'memcached.exe',
-    mailpit: 'mailpit.exe',
-    mongodb: 'mongod.exe',
-    postgresql: 'postgres.exe',
-    postgres: 'postgres.exe',
-    php: 'php.exe'
-  };
   const exeName = exeMap[type];
   if (!exeName) return null;
 
@@ -107,8 +108,31 @@ export function getServiceBinPath(appPath, type, version, log = () => {}) {
   return null;
 }
 
-function getAvailableVersions(appPath, serviceType) {
+function checkDirectoryHasExecutable(dir, exeName, depth = 0) {
+  if (depth > 3) return false;
+  if (!fs.existsSync(dir)) return false;
+
+  const direct = path.join(dir, exeName);
+  if (fs.existsSync(direct)) return true;
+  const binPath = path.join(dir, 'bin', exeName);
+  if (fs.existsSync(binPath)) return true;
+
+  try {
+    const entries = fs.readdirSync(dir);
+    for (const entry of entries) {
+      const subPath = path.join(dir, entry);
+      if (fs.existsSync(subPath) && fs.statSync(subPath).isDirectory()) {
+        if (checkDirectoryHasExecutable(subPath, exeName, depth + 1)) return true;
+      }
+    }
+  } catch (e) {}
+  return false;
+}
+
+export function getAvailableVersions(appPath, serviceType) {
   const pathsToCheck = [serviceType];
+  const exeName = exeMap[serviceType];
+
   if (serviceType === 'mysql') pathsToCheck.push('mariadb');
   if (serviceType === 'mariadb') pathsToCheck.push('mysql');
 
@@ -121,7 +145,17 @@ function getAvailableVersions(appPath, serviceType) {
       if (fs.existsSync(binPath)) {
         try {
           const dirs = fs.readdirSync(binPath)
-            .filter(f => fs.statSync(path.join(binPath, f)).isDirectory());
+            .filter(f => {
+              const fullPath = path.join(binPath, f);
+              if (!fs.statSync(fullPath).isDirectory()) return false;
+              
+              // Si tenemos un ejecutable mapeado, verificar que exista en la carpeta
+              // (ya sea directo o en una subcarpeta recursiva) para asegurar que la versión es válida
+              if (exeName) {
+                return checkDirectoryHasExecutable(fullPath, exeName, 0);
+              }
+              return true;
+            });
           allVersions = [...allVersions, ...dirs];
         } catch (e) {}
       }
@@ -178,6 +212,20 @@ export function detectServices({ appPath, userConfig, appConfig, log = () => {} 
       requiresPhp: true,
       dependenciesReady: binPath !== null && !!phpBinPath,
       port: getPortFromConfig('apache', 80)
+    });
+  }
+
+  if (phpVersion) {
+    const binPath = getServiceBinPath(appPath, 'php', phpVersion, log);
+    services.push({
+      name: 'PHP',
+      type: 'php',
+      version: phpVersion,
+      availableVersions: availablePhp,
+      isInstalled: binPath !== null,
+      requiresPhp: false,
+      dependenciesReady: binPath !== null,
+      port: null
     });
   }
 

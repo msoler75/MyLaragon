@@ -5,13 +5,14 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
   const [remoteServices, setRemoteServices] = useState([]);
   const [loadingRepo, setLoadingRepo] = useState(true);
   const [activeTasks, setActiveTasks] = useState({}); // { 'id-version': 'installing' | 'uninstalling' }
+  const [hasFetched, setHasFetched] = useState(false);
 
   useEffect(() => {
     const fetchServices = async () => {
-      // Si ya tenemos datos, no hacemos nada al cambiar de pestaña
-      if (remoteServices.length > 0) return;
+      // Si ya hemos intentado cargar, no repetimos
+      if (hasFetched) return;
       
-      // Solo mostramos el loader la primera vez que se cargan los datos
+      setHasFetched(true);
       setLoadingRepo(true);
       if (window.electronAPI && typeof window.electronAPI.getRemoteServices === 'function') {
         try {
@@ -24,7 +25,7 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
       setLoadingRepo(false);
     };
     fetchServices();
-  }, [remoteServices.length]); // Solo depende de si tenemos datos o no
+  }, [hasFetched]); // Solo depende de hasFetched
 
   const handleInstall = async (service, versionInfo) => {
     const taskId = `${service.id}-${versionInfo.version}`;

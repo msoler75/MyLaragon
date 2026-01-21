@@ -62,13 +62,14 @@ function App() {
   const activeTranslations = translations[config.language] || translations.es || {};
   const t = activeTranslations;
   
-  if (Object.keys(translations).length === 0) {
-    console.error('[APP] ERROR: No hay traducciones cargadas!');
-  }
+  useEffect(() => {
+    if (Object.keys(translations).length === 0) {
+      console.error('[APP] ERROR: No hay traducciones cargadas!');
+    }
+  }, []);
   
-  console.log('[APP] Render App. activeTab:', activeTab, 'Services:', services.length, 't keys:', Object.keys(t).length);
-
   const refreshingRef = useRef(false);
+  const lastServicesRef = useRef();
   const loadServices = useCallback(async (isSilent = false, hiddenServicesOverride = null) => {
     // Si viene de un evento de React o similar, isSilent no será estrictamente true
     const silent = isSilent === true;
@@ -87,8 +88,13 @@ function App() {
         if (!servicesData || !Array.isArray(servicesData)) {
           console.error('[APP] getServices no devolvió un array válido:', servicesData);
         } else {
-          setServices(servicesData)
-          console.log('[APP] State actualizado con', servicesData.length, 'servicios');
+          if (JSON.stringify(servicesData) !== JSON.stringify(lastServicesRef.current)) {
+            setServices(servicesData)
+            lastServicesRef.current = servicesData;
+            console.log('[APP] State actualizado con', servicesData.length, 'servicios');
+          } else {
+            console.log('[APP] Servicios sin cambios, no actualizando state');
+          }
         }
       } catch (error) {
         console.error('[APP] Error fatal cargando servicios:', error)
@@ -141,6 +147,17 @@ function App() {
 
   useEffect(() => {
     let isMounted = true;
+    let logBuffer = [];
+    
+    const flushLogs = () => {
+      if (logBuffer.length > 0 && isMounted) {
+        setLogs(prev => {
+          const newLogs = [...prev, ...logBuffer].slice(-300);
+          logBuffer = [];
+          return newLogs;
+        });
+      }
+    };
     
     if (window.electronAPI && window.electronAPI.onLog) {
       // Función para formatear la fecha consistentemente
@@ -175,7 +192,12 @@ function App() {
           ...logData,
           timestamp: formatTime(logData.timestamp)
         };
-        setLogs(prev => [...prev, formattedLog].slice(-300));
+        logBuffer.push(formattedLog);
+        
+        // Flush en el próximo tick si es el primer log en el buffer
+        if (logBuffer.length === 1) {
+          setTimeout(flushLogs, 0);
+        }
       });
     }
 
@@ -183,7 +205,7 @@ function App() {
       isMounted = false;
       // Idealmente aquí removeríamos el listener, pero onLog en preload.js no devuelve el remover aún
     };
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === 'logs') {
@@ -199,7 +221,6 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('hiddenServices', JSON.stringify(hiddenServices))
-    loadServices()
   }, [hiddenServices])
 
   // Sistema de actualización inteligente: pausa durante acciones para evitar parpadeos y race conditions

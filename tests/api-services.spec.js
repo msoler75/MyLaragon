@@ -14,10 +14,10 @@ const __dirname = path.dirname(__filename);
 
 describe('API de servicios - Detección a través de services.json', () => {
   let servicesData;
-  const servicesJsonPath = path.join(__dirname, '..', 'services.json');
+  const servicesJsonPath = path.join(__dirname, '..', 'src', 'neutralino', 'services.json');
   
   before(() => {
-    // Verificar que services.json existe en la raíz del proyecto
+    // Verificar que services.json existe en el directorio src/neutralino
     if (!fs.existsSync(servicesJsonPath)) {
       throw new Error(`services.json no encontrado en: ${servicesJsonPath}`);
     }
@@ -27,8 +27,8 @@ describe('API de servicios - Detección a través de services.json', () => {
     servicesData = JSON.parse(content);
   });
 
-  it('services.json debe existir en la raíz del proyecto', () => {
-    assert.ok(fs.existsSync(servicesJsonPath), 'services.json no existe en la raíz');
+  it('services.json debe existir en src/neutralino', () => {
+    assert.ok(fs.existsSync(servicesJsonPath), 'services.json no existe en src/neutralino');
   });
 
   it('services.json debe tener formato válido con propiedad "services"', () => {
@@ -149,7 +149,7 @@ describe('API de servicios - Detección a través de services.json', () => {
 
 describe('Integración con neutralino-shim.js', () => {
   let shimContent;
-  const shimPath = path.join(__dirname, '..', 'neutralino', 'neutralino-shim.js');
+  const shimPath = path.join(__dirname, '..', 'src', 'neutralino', 'neutralino-shim.js');
   
   before(() => {
     if (fs.existsSync(shimPath)) {

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import https from 'node:https';
 import { execFileSync } from 'node:child_process';
 import { installFromZip } from '../electron/service-installer.js';
 import { detectServices, loadAppConfig } from '../electron/services-detector.js';
@@ -41,15 +42,31 @@ function startHttpServer(filePath) {
 
 function downloadToFile(url, dest) {
   return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    http.get(url, res => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        return;
+    const protocol = url.startsWith('https:') ? https : http;
+    const options = {
+      headers: {
+        'User-Agent': 'Node.js Test Script'
       }
-      res.pipe(file);
-      file.on('finish', () => file.close(resolve));
-    }).on('error', err => reject(err));
+    };
+    const request = (u) => {
+      protocol.get(u, options, res => {
+        if (res.statusCode === 302 || res.statusCode === 301) {
+          // Follow redirect
+          const redirectUrl = res.headers.location;
+          console.log(`[TEST] Redirecting to ${redirectUrl}`);
+          request(redirectUrl);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        const file = fs.createWriteStream(dest);
+        res.pipe(file);
+        file.on('finish', () => file.close(resolve));
+      }).on('error', err => reject(err));
+    };
+    request(url);
   });
 }
 
@@ -178,5 +195,210 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
     } finally {
       apacheSrv.close();
     }
+  });
+
+  it('instala una versión real de PHP descargada desde el servidor oficial y verifica que esté disponible', async () => {
+    // Elegir una versión de PHP de services.json, por ejemplo 8.2.30 (NTS)
+    const phpVersion = '8.2.30 (NTS)';
+    const phpUrl = 'https://windows.php.net/downloads/releases/php-8.2.30-nts-Win32-vs16-x64.zip';
+    const downloadedZip = path.join(tmpDir, 'php-real.zip');
+
+    try {
+      // Descargar el zip real desde el servidor oficial
+      console.log(`[TEST] Descargando PHP ${phpVersion} desde ${phpUrl}...`);
+      await downloadToFile(phpUrl, downloadedZip);
+      console.log('[TEST] Descarga completada. Tamaño del ZIP:', fs.statSync(downloadedZip).size, 'bytes');
+
+      // Instalar en la estructura esperada: neutralino/bin/php/8.2.30 (NTS)
+      const destDir = path.join(tmpDir, 'neutralino', 'bin', 'php', phpVersion);
+      await installFromZip({ zipPath: downloadedZip, destDir, onLog: console.log });
+
+      // Verificar contenido extraído
+      console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir));
+
+      // Verificar que el binario esté presente
+      const { getServiceBinPath } = await import('../electron/services-detector.js');
+      const phpBinPath = getServiceBinPath(tmpDir, 'php', phpVersion, console.log);
+      assert.ok(phpBinPath, `PHP ${phpVersion} no detectado tras instalación`);
+      console.log(`[TEST] PHP binario encontrado en: ${phpBinPath}`);
+
+      // Verificar que aparezca en availableVersions
+      const { getAvailableVersions } = await import('../electron/services-detector.js');
+      const availableVersions = getAvailableVersions(tmpDir, 'php');
+      assert.ok(availableVersions.includes(phpVersion), `PHP ${phpVersion} no en availableVersions: ${availableVersions.join(', ')}`);
+      console.log(`[TEST] Versiones PHP disponibles: ${availableVersions.join(', ')}`);
+
+      // Si hay Apache instalado, verificar que aparezca en availablePhpVersions
+      // Para este test, instalemos también Apache dummy para verificar
+      const apacheZip = makeZipWithExecutable(tmpDir, path.join('Apache24', 'bin', 'httpd.exe'), 'apache.zip');
+      const apacheDestDir = path.join(tmpDir, 'neutralino', 'bin', 'apache', '2.4.66');
+      await installFromZip({ zipPath: apacheZip, destDir: apacheDestDir, onLog: noop });
+
+      // app.ini con Apache y PHP
+      fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=2.4.66\n[php]\nversion=${phpVersion}`);
+
+      const appConfig = loadAppConfig(tmpDir, noop);
+      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const apache = services.find(s => s.type === 'apache');
+      assert.ok(apache, 'Apache no detectado');
+      assert.ok(apache.availablePhpVersions.includes(phpVersion), `PHP ${phpVersion} no en availablePhpVersions de Apache: ${apache.availablePhpVersions.join(', ')}`);
+      console.log(`[TEST] PHP disponible para Apache: ${apache.availablePhpVersions.join(', ')}`);
+
+    } catch (error) {
+      console.error(`[TEST] Error en instalación real de PHP: ${error.message}`);
+      throw error;
+    }
+  });
+
+  it('instala una versión real de Apache descargada desde el servidor oficial y verifica instalación/desinstalación', async () => {
+    const apacheVersion = '2.4.66';
+    const apacheUrl = 'https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.66-260107-Win64-VS18.zip';
+    const downloadedZip = path.join(tmpDir, 'apache-real.zip');
+
+    try {
+      console.log(`[TEST] Descargando Apache ${apacheVersion} desde ${apacheUrl}...`);
+      await downloadToFile(apacheUrl, downloadedZip);
+      console.log('[TEST] Descarga completada. Tamaño del ZIP:', fs.statSync(downloadedZip).size, 'bytes');
+
+      const destDir = path.join(tmpDir, 'neutralino', 'bin', 'apache', apacheVersion);
+      await installFromZip({ zipPath: downloadedZip, destDir, onLog: console.log });
+
+      console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir).slice(0, 10), '...'); // primeros 10
+
+      const { getServiceBinPath } = await import('../electron/services-detector.js');
+      const apacheBinPath = getServiceBinPath(tmpDir, 'apache', apacheVersion, console.log);
+      assert.ok(apacheBinPath, `Apache ${apacheVersion} no detectado tras instalación`);
+      console.log(`[TEST] Apache binario encontrado en: ${apacheBinPath}`);
+
+      const appConfig = loadAppConfig(tmpDir, noop);
+      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const apache = services.find(s => s.type === 'apache');
+      assert.ok(apache, 'Apache no detectado en servicios');
+      assert.equal(apache.isInstalled, true, 'Apache no marcado como instalado');
+
+      // Desinstalación: borrar carpeta
+      fs.rmSync(destDir, { recursive: true, force: true });
+      // app.ini con versión para que aparezca en servicios
+      fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=${apacheVersion}`);
+      const servicesAfter = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(tmpDir, noop), log: noop });
+      const apacheAfter = servicesAfter.find(s => s.type === 'apache');
+      assert.ok(apacheAfter);
+      assert.equal(apacheAfter.isInstalled, false, 'Apache debería estar no instalado tras borrar carpeta');
+
+    } catch (error) {
+      console.error(`[TEST] Error en instalación real de Apache: ${error.message}`);
+      throw error;
+    }
+  });
+
+  it('instala una versión real de MySQL descargada desde el servidor oficial y verifica instalación/desinstalación', async () => {
+    const mysqlVersion = '8.0.44';
+    const mysqlUrl = 'https://dev.mysql.com/get/Downloads/MySQL-8.0/mysql-8.0.44-winx64.zip';
+    const downloadedZip = path.join(tmpDir, 'mysql-real.zip');
+
+    try {
+      console.log(`[TEST] Descargando MySQL ${mysqlVersion} desde ${mysqlUrl}...`);
+      await downloadToFile(mysqlUrl, downloadedZip);
+      console.log('[TEST] Descarga completada. Tamaño del ZIP:', fs.statSync(downloadedZip).size, 'bytes');
+
+      const destDir = path.join(tmpDir, 'neutralino', 'bin', 'mysql', mysqlVersion);
+      await installFromZip({ zipPath: downloadedZip, destDir, onLog: console.log });
+
+      console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir).slice(0, 10), '...');
+
+      const { getServiceBinPath } = await import('../electron/services-detector.js');
+      const mysqlBinPath = getServiceBinPath(tmpDir, 'mysql', mysqlVersion, console.log);
+      assert.ok(mysqlBinPath, `MySQL ${mysqlVersion} no detectado tras instalación`);
+      console.log(`[TEST] MySQL binario encontrado en: ${mysqlBinPath}`);
+
+      const appConfig = loadAppConfig(tmpDir, noop);
+      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const mysql = services.find(s => s.type === 'mysql');
+      assert.ok(mysql, 'MySQL no detectado en servicios');
+      assert.equal(mysql.isInstalled, true, 'MySQL no marcado como instalado');
+
+      // Desinstalación
+      fs.rmSync(destDir, { recursive: true, force: true });
+      // app.ini con versión
+      fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[mysql]\nversion=${mysqlVersion}`);
+      const servicesAfter = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(tmpDir, noop), log: noop });
+      const mysqlAfter = servicesAfter.find(s => s.type === 'mysql');
+      assert.ok(mysqlAfter);
+      assert.equal(mysqlAfter.isInstalled, false, 'MySQL debería estar no instalado tras borrar carpeta');
+
+    } catch (error) {
+      console.error(`[TEST] Error en instalación real de MySQL: ${error.message}`);
+      throw error;
+    }
+  });
+
+  it('instala una versión real de MailPit descargada desde el servidor oficial y verifica instalación/desinstalación', async () => {
+    const mailpitVersion = '1.20.4';
+    const mailpitUrl = 'https://github.com/axllent/mailpit/releases/download/v1.20.4/mailpit-windows-amd64.zip';
+    const downloadedZip = path.join(tmpDir, 'mailpit-real.zip');
+
+    try {
+      console.log(`[TEST] Descargando MailPit ${mailpitVersion} desde ${mailpitUrl}...`);
+      await downloadToFile(mailpitUrl, downloadedZip);
+      console.log('[TEST] Descarga completada. Tamaño del ZIP:', fs.statSync(downloadedZip).size, 'bytes');
+
+      const destDir = path.join(tmpDir, 'neutralino', 'bin', 'mailpit', mailpitVersion);
+      await installFromZip({ zipPath: downloadedZip, destDir, onLog: console.log });
+
+      console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir));
+
+      const { getServiceBinPath } = await import('../electron/services-detector.js');
+      const mailpitBinPath = getServiceBinPath(tmpDir, 'mailpit', mailpitVersion, console.log);
+      assert.ok(mailpitBinPath, `MailPit ${mailpitVersion} no detectado tras instalación`);
+      console.log(`[TEST] MailPit binario encontrado en: ${mailpitBinPath}`);
+
+      const appConfig = loadAppConfig(tmpDir, noop);
+      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const mailpit = services.find(s => s.type === 'mailpit');
+      assert.ok(mailpit, 'MailPit no detectado en servicios');
+      assert.equal(mailpit.isInstalled, true, 'MailPit no marcado como instalado');
+
+      // Desinstalación
+      fs.rmSync(destDir, { recursive: true, force: true });
+      // app.ini con versión
+      fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[mailpit]\nversion=${mailpitVersion}`);
+      const servicesAfter = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(tmpDir, noop), log: noop });
+      const mailpitAfter = servicesAfter.find(s => s.type === 'mailpit');
+      assert.ok(mailpitAfter);
+      assert.equal(mailpitAfter.isInstalled, false, 'MailPit debería estar no instalado tras borrar carpeta');
+
+    } catch (error) {
+      console.error(`[TEST] Error en instalación real de MailPit: ${error.message}`);
+      throw error;
+    }
+  });
+
+  it('verifica que Apache esté disponible cuando PHP está instalado', async () => {
+    // Instalar PHP real primero
+    const phpUrl = 'https://windows.php.net/downloads/releases/php-8.2.30-nts-Win32-vs16-x64.zip';
+    const phpZip = path.join(tmpDir, 'php-real.zip');
+    await downloadToFile(phpUrl, phpZip);
+    const phpDest = path.join(tmpDir, 'neutralino', 'bin', 'php', '8.2.30 (NTS)');
+    await installFromZip({ zipPath: phpZip, destDir: phpDest, onLog: noop });
+
+    // Instalar Apache real
+    const apacheUrl = 'https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.66-260107-Win64-VS18.zip';
+    const apacheZip = path.join(tmpDir, 'apache-real.zip');
+    await downloadToFile(apacheUrl, apacheZip);
+    const apacheDest = path.join(tmpDir, 'neutralino', 'bin', 'apache', '2.4.66');
+    await installFromZip({ zipPath: apacheZip, destDir: apacheDest, onLog: noop });
+
+    // Configurar app.ini
+    fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=2.4.66\n[php]\nversion=8.2.30 (NTS)`);
+
+    // Detectar servicios
+    const appConfig = loadAppConfig(tmpDir, noop);
+    const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+
+    const apache = services.find(s => s.type === 'apache');
+    assert.ok(apache, 'Apache no detectado');
+    assert.equal(apache.isInstalled, true, 'Apache no marcado como instalado');
+    assert.equal(apache.dependenciesReady, true, 'Apache no tiene dependencias listas con PHP instalado');
+    assert.equal(apache.phpVersion, '8.2.30 (NTS)', 'PHP version no asignada correctamente a Apache');
   });
 });

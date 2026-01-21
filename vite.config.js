@@ -18,31 +18,12 @@ export default defineConfig({
       buildStart() {
         const wwwDir = path.resolve('neutralino/www');
         
-        // Función para sincronizar archivos fuente -> www (para cuando fallan los enlaces simbólicos)
-        const syncFile = (src, destName) => {
-          const srcPath = path.resolve(src);
-          const destPath = path.join(wwwDir, destName);
+        // Verificación de archivos maestros (Single Source of Truth)
+        const checkMasterFile = (fileName) => {
+          const destPath = path.join(wwwDir, fileName);
           
-          try {
-            if (fs.existsSync(srcPath)) {
-              // Si no existe el destino o el origen es más nuevo, copiar
-              const srcStats = fs.statSync(srcPath);
-              let shouldCopy = !fs.existsSync(destPath);
-              
-              if (!shouldCopy) {
-                const destStats = fs.statSync(destPath);
-                // Si es un enlace simbólico, no tocar nada
-                if (fs.lstatSync(destPath).isSymbolicLink()) return;
-                shouldCopy = srcStats.mtime > destStats.mtime;
-              }
-              
-              if (shouldCopy) {
-                fs.copyFileSync(srcPath, destPath);
-                console.log(`[SYNC] ✓ ${destName} sincronizado`);
-              }
-            }
-          } catch (e) {
-            console.warn(`[SYNC] ⚠️ Error sincronizando ${destName}:`, e.message);
+          if (!fs.existsSync(destPath)) {
+            console.warn(`[CHECK] ⚠️ Falta recurso generado: ${fileName}. Ejecuta 'npm run setup:links'.`);
           }
         };
 
@@ -50,15 +31,11 @@ export default defineConfig({
           fs.mkdirSync(wwwDir, { recursive: true });
         }
 
-        // Sincronizar archivos críticos antes de limpiar lo demás
-        syncFile('neutralino/neutralino-shim.js', 'neutralino-shim.js');
-        syncFile('services.json', 'services.json');
-        syncFile('neutralino/neutralino.js', 'neutralino.js');
-        syncFile('neutralino/vite.svg', 'vite.svg');
-        syncFile('neutralino/bootstrap.html', 'bootstrap.html');
+        // Verificar que los archivos críticos existan en www/
+        ['neutralino-shim.js', 'services.json', 'neutralino.js', 'bootstrap.html'].forEach(checkMasterFile);
 
         const files = fs.readdirSync(wwwDir);
-        // Archivos a preservar (enlaces simbólicos y archivos de Neutralino)
+        // Archivos a preservar (generados por scripts/create-symlinks.js)
         const preserve = ['neutralino.js', 'neutralino-shim.js', 'services.json', 'vite.svg', 'bootstrap.html', 'test-services.html'];
         
         files.forEach(file => {
@@ -68,8 +45,8 @@ export default defineConfig({
               const stats = fs.lstatSync(filePath);
               if (stats.isDirectory()) {
                 fs.rmSync(filePath, { recursive: true, force: true });
-              } else if (!stats.isSymbolicLink()) {
-                // Solo eliminar archivos regulares, no enlaces simbólicos
+              } else {
+                // Eliminar archivos que no son parte de los recursos maestros sincronizados
                 fs.unlinkSync(filePath);
               }
             } catch (e) {
@@ -151,6 +128,19 @@ export default defineConfig({
       apply: 'serve',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
+          // Proxy para /www/services.json -> services.json en desarrollo
+          if (req.url === '/www/services.json') {
+            const servicesPath = path.resolve('src/neutralino/services.json');
+            if (fs.existsSync(servicesPath)) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(fs.readFileSync(servicesPath, 'utf-8'));
+              return;
+            } else {
+              res.writeHead(404);
+              res.end('Services config not found');
+              return;
+            }
+          }
           // Endpoint: /api/exec
           if (req.url === '/api/exec' && req.method === 'POST') {
             let body = '';
@@ -211,6 +201,23 @@ export default defineConfig({
               } catch (err) {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ entries: null, error: err.message }));
+              }
+            });
+          }
+          // Endpoint: /api/write-log (NUEVO para paridad de logs en DEV)
+          else if (req.url === '/api/write-log' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+              try {
+                const { message } = JSON.parse(body);
+                const logPath = path.resolve('app-debug.log');
+                fs.appendFileSync(logPath, message);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+              } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
               }
             });
           }

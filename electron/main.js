@@ -5,7 +5,13 @@ import { exec, spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import https from 'https';
-import { installFromZip } from './service-installer.js';
+import { installFromZip, downloadFile } from './service-installer.js';
+import { 
+  detectServices as detectServicesCore, 
+  loadAppConfig as loadAppConfigCore,
+  getServiceBinPath as getServiceBinPathCore,
+  getAvailableVersions as getAvailableVersionsCore
+} from './services-detector.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,21 +20,40 @@ const __dirname = path.dirname(__filename);
 const userDataPath = app.getPath('userData');
 const configPath = path.join(userDataPath, 'user-config.json');
 
-// El log ahora estará en la raíz de la app para fácil acceso
-let logPath = path.join(app.isPackaged ? path.dirname(app.getPath('exe')) : path.resolve(__dirname, '..'), 'webservdev.log');
+// El log ahora estará en la raíz de la app para fácil acceso (Unificado con Shim)
+const logFileName = 'app-debug.log';
+let logPath = path.join(app.isPackaged ? path.dirname(app.getPath('exe')) : path.resolve(__dirname, '..'), logFileName);
 
 let mainWindow;
 
-// Sistema de logs simple
+// Sistema de logs unificado
+const originalConsole = {
+  log: console.log,
+  warn: console.warn,
+  error: console.error
+};
+
 function log(message, level = 'INFO') {
   const timestamp = new Date().toISOString();
-  const cleanMessage = String(message).trim();
+  // Manejar objetos en el log
+  let cleanMessage = message;
+  if (typeof message === 'object') {
+    try {
+      cleanMessage = JSON.stringify(message, null, 2);
+    } catch (e) {
+      cleanMessage = String(message);
+    }
+  }
+  
+  cleanMessage = String(cleanMessage).trim();
   const logMessage = `[${timestamp}] [${level}] ${cleanMessage}\n`;
   
-  console.log(logMessage.trim());
+  // Mostrar en la terminal original (stdout)
+  if (level === 'ERROR') originalConsole.error(cleanMessage);
+  else if (level === 'WARNING') originalConsole.warn(cleanMessage);
+  else originalConsole.log(cleanMessage);
   
   try {
-    // Si logPath no ha sido inicializado correctamente todavía, intentamos uno temporal
     fs.appendFileSync(logPath, logMessage);
     
     // Enviar log al frontend si la ventana está disponible
@@ -36,17 +61,22 @@ function log(message, level = 'INFO') {
       mainWindow.webContents.send('app-log', {
         timestamp: timestamp,
         message: cleanMessage,
-        level: level
+        level: level === 'WARNING' ? 'WARN' : level // Normalizar para UI
       });
     }
   } catch (err) {
-    // Si falla escribir en appPath (por permisos), intentar en userData
+    // Si falla escribir en logPath (por permisos), intentar en userData
     try {
-      const fallbackLog = path.join(userDataPath, 'app.log');
+      const fallbackLog = path.join(userDataPath, logFileName);
       fs.appendFileSync(fallbackLog, `[FALLBACK] ${logMessage}`);
     } catch (e) {}
   }
 }
+
+// Interceptar consola global en Electron para que TODO vaya al archivo
+console.log = (...args) => log(args.join(' '), 'INFO');
+console.warn = (...args) => log(args.join(' '), 'WARNING');
+console.error = (...args) => log(args.join(' '), 'ERROR');
 
 // Limpiar log antiguo solo si es muy grande (> 1MB)
 try {
@@ -147,355 +177,30 @@ const execAsync = (command) => {
   });
 };
 
-const executableMapping = {
-  'apache': 'httpd.exe',
-  'nginx': 'nginx.exe',
-  'mysql': 'mysqld.exe',
-  'mariadb': 'mysqld.exe',
-  'redis': 'redis-server.exe',
-  'memcached': 'memcached.exe',
-  'mailpit': 'mailpit.exe',
-  'mongodb': 'mongod.exe',
-  'postgresql': 'postgres.exe'
-};
-
+// Wrappers para usar la lógica compartida de services-detector.js
 /**
  * Encuentra de forma inteligente la carpeta bin de un servicio,
  * manejando carpetas anidadas tras extracciones ZIP (ej: Apache24/bin).
  */
 function getServiceBinPath(type, version) {
-  if (!version) return null;
-  const exeName = executableMapping[type];
-  if (!exeName) return null;
-
-  const possiblePaths = [
-    path.join(userConfig.appPath, 'bin', type, version),
-    path.join(userConfig.appPath, 'bin', type === 'mysql' ? 'mariadb' : (type === 'mariadb' ? 'mysql' : type), version)
-  ];
-
-  for (const basePath of possiblePaths) {
-    if (!fs.existsSync(basePath)) continue;
-
-    // 1. Directo o en /bin
-    if (fs.existsSync(path.join(basePath, exeName))) return basePath;
-    if (fs.existsSync(path.join(basePath, 'bin', exeName))) return path.join(basePath, 'bin');
-
-    // 2. Buscar una carpeta adentro (ej: Apache24, mysql-8.0...)
-    try {
-      const subdirs = fs.readdirSync(basePath).filter(f => fs.statSync(path.join(basePath, f)).isDirectory());
-      for (const sub of subdirs) {
-        const subPath = path.join(basePath, sub);
-        if (fs.existsSync(path.join(subPath, exeName))) return subPath;
-        if (fs.existsSync(path.join(subPath, 'bin', exeName))) return path.join(subPath, 'bin');
-      }
-    } catch (e) {}
-  }
-  return null;
+  return getServiceBinPathCore(userConfig.appPath, type, version, log);
 }
 
 // Leer configuración de App
 function getAppConfig() {
-  const possiblePaths = [
-    path.join(userConfig.appPath, 'app.ini'),
-    path.join(userConfig.appPath, 'usr', 'app.ini')
-  ];
-
-  let iniPath = possiblePaths[0];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      iniPath = p;
-      break;
-    }
-  }
-
-  const config = {};
-  try {
-    if (fs.existsSync(iniPath)) {
-      const content = fs.readFileSync(iniPath, 'utf-8');
-      const lines = content.split('\n');
-      let section = '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-          section = trimmed.slice(1, -1).toLowerCase();
-        } else if (trimmed.includes('=')) {
-          const [key, ...valueParts] = trimmed.split('=');
-          const value = valueParts.join('=');
-          if (!config[section]) config[section] = {};
-          config[section][key.trim().toLowerCase()] = value.trim();
-        }
-      }
-    } else {
-      log(`App config not found at: ${iniPath}`, 'WARNING');
-    }
-  } catch (error) {
-    log(`Error reading app.ini: ${error.message}`, 'ERROR');
-  }
-  return config;
+  return loadAppConfigCore(userConfig.appPath, log);
 }
 
 console.log('Main process starting...');
 
 // Detectar servicios disponibles
 function detectServices() {
-  const config = getAppConfig();
-  const services = [];
-
-  const isServiceInstalled = (type, version) => {
-    return getServiceBinPath(type, version) !== null;
-  };
-
-  const getAvailableVersions = (serviceType) => {
-    const pathsToCheck = [serviceType];
-    // Aliases comunes en App
-    if (serviceType === 'mysql') pathsToCheck.push('mariadb');
-    if (serviceType === 'mariadb') pathsToCheck.push('mysql');
-    
-    let allVersions = [];
-
-    for (const type of pathsToCheck) {
-      const binPath = path.join(userConfig.appPath, 'bin', type);
-      if (fs.existsSync(binPath)) {
-        try {
-          const dirs = fs.readdirSync(binPath)
-            .filter(f => fs.statSync(path.join(binPath, f)).isDirectory());
-          allVersions = [...allVersions, ...dirs];
-        } catch (e) {}
-      }
-    }
-    
-    // Eliminar duplicados y ordenar descendente
-    return [...new Set(allVersions)].sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
-  };
-
-  const availablePhp = getAvailableVersions('php');
-  const phpVersion = config.php?.version || (availablePhp.length > 0 ? availablePhp[0] : undefined);
-  
-  // Detectar Apache
-  const availableApache = getAvailableVersions('apache');
-  const apacheVersion = config.apache?.version || (availableApache.length > 0 ? availableApache[0] : undefined);
-  
-  if (apacheVersion) {
-    const binPath = getServiceBinPath('apache', apacheVersion);
-    const apacheBase = binPath ? (binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : binPath) : path.join(userConfig.appPath, 'bin', 'apache', apacheVersion);
-    
-    // Localizar php.ini correctamente si existe PHP
-    const phpBinPath = getServiceBinPath('php', phpVersion);
-    const phpBase = phpBinPath ? (phpBinPath.toLowerCase().endsWith('bin') ? path.dirname(phpBinPath) : phpBinPath) : (phpVersion ? path.join(userConfig.appPath, 'bin', 'php', phpVersion) : null);
-
-    const documentRoot = config.apache?.documentroot || userConfig.projectsPath;
-    const apacheConfigs = [
-      { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
-      { label: 'httpd.conf', path: path.join(apacheBase, 'conf', 'httpd.conf') },
-      { label: 'httpd-vhosts.conf', path: path.join(apacheBase, 'conf', 'extra', 'httpd-vhosts.conf') },
-      { label: 'php.ini', path: phpBase ? path.join(phpBase, 'php.ini') : '' },
-      { label: 'php_errors.log', path: path.join(userConfig.appPath, 'tmp', 'php_errors.log') }
-    ].filter(c => c.path && (c.type === 'folder' || fs.existsSync(c.path)));
-
-    services.push({ 
-      name: 'Apache', 
-      type: 'apache', 
-      version: apacheVersion,
-      phpVersion: phpVersion,
-      configs: apacheConfigs,
-      availableVersions: availableApache,
-      availablePhpVersions: availablePhp,
-      isInstalled: binPath !== null,
-      requiresPhp: true,
-      dependenciesReady: binPath !== null && !!phpBinPath,
-    });
-  }
-
-  // Detectar MySQL/MariaDB
-  const availableMysql = getAvailableVersions('mysql');
-  const mysqlVersion = config.mysql?.version || (availableMysql.length > 0 ? availableMysql[0] : undefined);
-
-  if (mysqlVersion) {
-    // Buscar la ruta base real
-    const binPath = getServiceBinPath('mysql', mysqlVersion);
-    let mysqlBase = binPath ? (binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : binPath) : path.join(userConfig.appPath, 'bin', 'mysql', mysqlVersion);
-
-    const mysqlConfigs = [
-      { label: 'my.ini', path: path.join(mysqlBase, 'my.ini') },
-      { label: 'error.log', path: path.join(userConfig.appPath, 'data', 'mysql', 'error.log') }
-    ];
-
-    // Buscar otros archivos .log en la carpeta de la versión
-    if (fs.existsSync(mysqlBase)) {
-      try {
-        const files = fs.readdirSync(mysqlBase);
-        files.forEach(file => {
-          if (file.endsWith('.log')) {
-            mysqlConfigs.push({ label: file, path: path.join(mysqlBase, file) });
-          }
-        });
-        
-        // También buscar en la subcarpeta 'data' si existe dentro de bin (algunas versiones)
-        const dataInBin = path.join(mysqlBase, 'data');
-        if (fs.existsSync(dataInBin)) {
-          const dataFiles = fs.readdirSync(dataInBin);
-          dataFiles.forEach(file => {
-            if (file.endsWith('.log')) {
-              mysqlConfigs.push({ label: `data/${file}`, path: path.join(dataInBin, file) });
-            }
-          });
-        }
-
-        // Escanear la carpeta App/data/ para encontrar TODOS los archivos .log
-        const AppDataPath = path.join(userConfig.appPath, 'data');
-        if (fs.existsSync(AppDataPath)) {
-          try {
-            const dataSubfolders = fs.readdirSync(AppDataPath);
-            dataSubfolders.forEach(subfolder => {
-              const subfolderPath = path.join(AppDataPath, subfolder);
-              if (fs.statSync(subfolderPath).isDirectory()) {
-                const subFiles = fs.readdirSync(subfolderPath);
-                subFiles.forEach(file => {
-                  if (file.endsWith('.log')) {
-                    mysqlConfigs.push({ label: `${subfolder}/${file}`, path: path.join(subfolderPath, file) });
-                  }
-                });
-              } else if (subfolder.endsWith('.log')) {
-                // Logs directamente en la carpeta data
-                mysqlConfigs.push({ label: subfolder, path: subfolderPath });
-              }
-            });
-          } catch (err) {
-            log(`Error escaneando logs de datos: ${err.message}`, 'ERROR');
-          }
-        }
-      } catch (e) {}
-    }
-
-    // Eliminar duplicados por ruta y filtrar por existencia
-    const uniqueConfigs = [];
-    const seenPaths = new Set();
-    
-    mysqlConfigs.forEach(c => {
-      if (fs.existsSync(c.path) && !seenPaths.has(c.path)) {
-        uniqueConfigs.push(c);
-        seenPaths.add(c.path);
-      }
-    });
-
-    services.push({ 
-      name: 'MySQL', 
-      type: 'mysql', 
-      version: mysqlVersion,
-      configs: uniqueConfigs,
-      availableVersions: availableMysql,
-      isInstalled: binPath !== null
-    });
-  }
-
-  // Detectar Nginx
-  const availableNginx = getAvailableVersions('nginx');
-  const nginxVersion = config.nginx?.version || (availableNginx.length > 0 ? availableNginx[0] : undefined);
-
-  if (nginxVersion) {
-    const binPath = getServiceBinPath('nginx', nginxVersion);
-    const nginxBase = binPath ? (binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : binPath) : path.join(userConfig.appPath, 'bin', 'nginx', nginxVersion);
-    
-    const documentRoot = config.apache?.documentroot || userConfig.projectsPath; 
-    const nginxConfigs = [
-      { label: 'OPEN_DOCROOT', path: documentRoot, type: 'folder' },
-      { label: 'nginx.conf', path: path.join(nginxBase, 'conf', 'nginx.conf') },
-      { label: 'php.ini', path: phpVersion ? path.join(userConfig.appPath, 'bin', 'php', phpVersion, 'php.ini') : '' },
-      { label: 'php_errors.log', path: path.join(userConfig.appPath, 'tmp', 'php_errors.log') }
-    ].filter(c => c.path && (c.type === 'folder' || fs.existsSync(c.path)));
-    services.push({ 
-      name: 'Nginx', 
-      type: 'nginx', 
-      version: nginxVersion, 
-      phpVersion: phpVersion,
-      configs: nginxConfigs,
-      availableVersions: availableNginx,
-      availablePhpVersions: availablePhp,
-      isInstalled: isServiceInstalled('nginx', nginxVersion)
-    });
-  }
-
-  // Detectar Redis
-  const availableRedis = getAvailableVersions('redis');
-  const redisVersion = config.redis?.version || (availableRedis.length > 0 ? availableRedis[0] : undefined);
-  if (redisVersion) {
-    const binPath = getServiceBinPath('redis', redisVersion);
-    services.push({ 
-      name: 'Redis', 
-      type: 'redis', 
-      version: redisVersion,
-      availableVersions: availableRedis,
-      isInstalled: binPath !== null,
-      requiresPhp: false,
-      dependenciesReady: binPath !== null
-    });
-  }
-
-  // Detectar Memcached
-  const availableMemcached = getAvailableVersions('memcached');
-  const memcachedVersion = config.memcached?.version || (availableMemcached.length > 0 ? availableMemcached[0] : undefined);
-  if (memcachedVersion) {
-    const binPath = getServiceBinPath('memcached', memcachedVersion);
-    services.push({ 
-      name: 'Memcached', 
-      type: 'memcached', 
-      version: memcachedVersion,
-      availableVersions: availableMemcached,
-      isInstalled: binPath !== null,
-      requiresPhp: false,
-      dependenciesReady: binPath !== null
-    });
-  }
-
-  // Detectar MailPit
-  const availableMailpit = getAvailableVersions('mailpit');
-  const mailpitVersion = config.mailpit?.version || (availableMailpit.length > 0 ? availableMailpit[0] : undefined);
-  if (mailpitVersion) {
-    const binPath = getServiceBinPath('mailpit', mailpitVersion);
-    services.push({ 
-      name: 'Mailpit', 
-      type: 'mailpit', 
-      version: mailpitVersion,
-      availableVersions: availableMailpit,
-      isInstalled: binPath !== null,
-      requiresPhp: false,
-      dependenciesReady: binPath !== null
-    });
-  }
-
-  // Detectar MongoDB
-  const availableMongodb = getAvailableVersions('mongodb');
-  const mongodbVersion = config.mongodb?.version || (availableMongodb.length > 0 ? availableMongodb[0] : undefined);
-  if (mongodbVersion) {
-    const binPath = getServiceBinPath('mongodb', mongodbVersion);
-    services.push({ 
-      name: 'MongoDB', 
-      type: 'mongodb', 
-      version: mongodbVersion,
-      availableVersions: availableMongodb,
-      isInstalled: binPath !== null,
-      requiresPhp: false,
-      dependenciesReady: binPath !== null
-    });
-  }
-
-  // Detectar PostgreSQL
-  const availablePostgresql = getAvailableVersions('postgresql');
-  const postgresqlVersion = config.postgresql?.version || (availablePostgresql.length > 0 ? availablePostgresql[0] : undefined);
-  if (postgresqlVersion) {
-    const binPath = getServiceBinPath('postgresql', postgresqlVersion);
-    services.push({ 
-      name: 'PostgreSQL', 
-      type: 'postgresql', 
-      version: postgresqlVersion,
-      availableVersions: availablePostgresql,
-      isInstalled: binPath !== null,
-      requiresPhp: false,
-      dependenciesReady: binPath !== null
-    });
-  }
-
-  return services;
+  return detectServicesCore({ 
+    appPath: userConfig.appPath, 
+    userConfig, 
+    appConfig: getAppConfig(), 
+    log 
+  });
 }
 
 ipcMain.handle('get-logs', async () => {
@@ -505,14 +210,13 @@ ipcMain.handle('get-logs', async () => {
       const lines = content.split('\n').filter(line => line.trim());
       
       return lines.map(line => {
-        // Formato: [2026-01-07T10:00:00.000Z] [LEVEL] Message
-        const match = line.match(/^\[(.*?)\] \[(.*?)\] (.*)$/);
+        // Formato: [timestamp] [level] mensaje
+        const match = line.match(/\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.*)/);
         if (match) {
-          const [_, timestamp, level, message] = match;
           return {
-            timestamp,
-            level,
-            message
+            timestamp: match[1],
+            level: match[2],
+            message: match[3]
           };
         }
         return { timestamp: new Date().toISOString(), level: 'INFO', message: line };
@@ -1829,47 +1533,30 @@ ipcMain.handle('get-remote-services', async () => {
 
 ipcMain.handle('install-service', async (event, { url, serviceId, version, installPath }) => {
   const tempDir = path.join(defaultRoot, 'tmp');
-  const fileName = `${serviceId}-${version}.zip`;
+  const fileName = `${serviceId}-${version.replace(/\s+/g, '_')}.zip`;
   const filePath = path.join(tempDir, fileName);
-  const destDir = path.join(defaultRoot, installPath, version);
+  
+  // IMPORTANTE: En esta arquitectura, los binarios se guardan en neutralino/bin/
+  // Si installPath es "bin/php", lo convertimos a "neutralino/bin/php" para desarrollo
+  const normalizedInstallPath = installPath.startsWith('neutralino') ? installPath : path.join('neutralino', installPath);
+  const destDir = path.join(defaultRoot, normalizedInstallPath, version);
 
   log(`Iniciando instalación de ${serviceId} v${version}...`);
+  log(`Ruta destino calculada: ${destDir}`);
 
   try {
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    // Asegurar que la carpeta padre del destino existe (ej: neutralino/bin/php)
     if (!fs.existsSync(path.dirname(destDir))) fs.mkdirSync(path.dirname(destDir), { recursive: true });
 
-    // 1. Descargar
-    log(`Descargando ${url}...`);
-    await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(filePath);
-      https.get(url, (response) => {
-        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-          https.get(response.headers.location, (res) => {
-            res.pipe(file);
-            file.on('finish', () => {
-              file.close();
-              resolve();
-            });
-          }).on('error', reject);
-        } else {
-          response.pipe(file);
-          file.on('finish', () => {
-            file.close();
-            resolve();
-          });
-        }
-      }).on('error', (err) => {
-        fs.unlink(filePath, () => {});
-        reject(err);
-      });
-    });
+    // 1. Descargar (usando la nueva utilidad compartida basada en PowerShell)
+    await downloadFile(url, filePath, log);
 
     // 2. Extraer
-  await installFromZip({ zipPath: filePath, destDir, onLog: log });
+    await installFromZip({ zipPath: filePath, destDir, onLog: log });
 
     // 3. Limpiar
-    fs.unlinkSync(filePath);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
     // 4. Actualizar app.ini si el servicio no tiene versión activa
     updateAppIniVersion(serviceId, version);
@@ -1912,7 +1599,8 @@ function updateAppIniVersion(serviceId, version) {
 }
 
 ipcMain.handle('uninstall-service', async (event, { serviceId, version, installPath }) => {
-  const destDir = path.join(defaultRoot, installPath, version);
+  const normalizedInstallPath = installPath.startsWith('neutralino') ? installPath : path.join('neutralino', installPath);
+  const destDir = path.join(defaultRoot, normalizedInstallPath, version);
   log(`Desinstalando ${serviceId} v${version} de ${destDir}...`);
   try {
     if (fs.existsSync(destDir)) {

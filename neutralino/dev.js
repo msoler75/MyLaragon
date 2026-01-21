@@ -28,16 +28,17 @@ try {
         }
     };
 
-    // Sincronizar archivos necesarios para que estén disponibles en el "documentRoot" de Neutralino
-    syncToWww('../services.json', 'services.json');
-    syncToWww('neutralino-shim.js', 'neutralino-shim.js');
-    syncToWww('neutralino.js', 'neutralino.js');
-    syncToWww('bootstrap.html', 'bootstrap.html');
+    // Sincronizar archivos necesarios desde src/neutralino para que estén disponibles en el "documentRoot" de Neutralino
+    syncToWww('../src/neutralino/services.json', 'services.json');
+    syncToWww('../src/neutralino/neutralino-shim.js', 'neutralino-shim.js');
+    syncToWww('../src/neutralino/neutralino.js', 'neutralino.js');
+    syncToWww('../src/neutralino/bootstrap.html', 'bootstrap.html');
     
     // Configuración para desarrollo con Vite
     config.url = 'http://localhost:5173/';
     config.documentRoot = './www/';
     config.enableServer = false; // Desactivar servidor para que ignore resources.neu
+    config.basePath = path.join(process.cwd(), '..').replace(/\\/g, '/');
     
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
     

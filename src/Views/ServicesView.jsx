@@ -52,14 +52,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
     }
   };
   
-  console.log('[VIEW] Render ServicesView', { 
-    servicesCount: services?.length, 
-    hiddenCount: hiddenServices?.length,
-    loading 
-  });
-
   const visibleServices = Array.isArray(services) ? services.filter(s => !hiddenServices.includes(s.name)) : [];
-  console.log('[VIEW] visibleServices:', visibleServices.length);
   
   const hiddenList = Array.isArray(services) ? services.filter(s => hiddenServices.includes(s.name)) : [];
   

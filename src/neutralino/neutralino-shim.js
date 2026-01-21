@@ -1,24 +1,6 @@
-// Neutralino compatibility shim for window.electronAPI
+// Neutralino compatibility shim for globalThis.electronAPI
 (function(){
-  console.log('[SHIM] Cargando Neutralino Shim v1.2.0 (Enhanced PHP Detection)');
-  if(typeof Neutralino !== 'undefined') {
-    Neutralino.init();
-  }
-  
-  // Detectar raíz real en Neutralino (NL_PATH es el directorio del binary)
-  // En producción (dist/WebServDev), la raíz de la app está 2 niveles arriba (donde está bin/, www/, etc.)
-  const neutralinoRoot = window.NL_PATH || '.';
-  let appRoot = neutralinoRoot;
-  
-  // Si estamos en dist/WebServDev, subir niveles para encontrar la carpeta bin/ real
-  if (window.NL_PATH && window.NL_PATH.includes('dist')) {
-    // Si la ruta termina en dist/WebServDev, la raíz real es 2 niveles arriba
-    // Ejemplo: Proyectos/MyLaragon/neutralino/dist/WebServDev -> Proyectos/MyLaragon/neutralino
-    appRoot = window.NL_PATH.replace(/[\\/]dist[\\/].*$/, '') || '.';
-    console.log('[SHIM] Detectado modo DIST, ajustando appRoot a:', appRoot);
-  }
-
-  // --- SISTEMA DE LOGS PERSISTENTES ---
+  // --- SISTEMA DE LOGS PERSISTENTES (CAPA TEMPRANA) ---
   const originalConsole = {
     log: console.log,
     warn: console.warn,
@@ -26,61 +8,202 @@
     info: console.info
   };
 
-  // Flag global para evitar saturación durante instalaciones
-  window.__is_installing = false;
+  let logBuffer = [];
+  let neutralinoReady = false;
+  
+  // Detección robusta del entorno
+  const checkIsDev = () => {
+    // Si hay token de Neutralino, definitivamente NO es el dev server de Vite
+    if (globalThis.NL_TOKEN || globalThis.NL_PORT || globalThis.Neutralino) return false;
+    // Estamos en el puerto de Vite y sin token? OK, es DEV
+    return globalThis.location.port === '5173';
+  };
 
-  const logToFile = async (level, ...args) => {
-    const timestamp = new Date().toLocaleString();
+  let IS_DEV = checkIsDev();
+
+  const flushBuffer = async () => {
+    if (logBuffer.length === 0) return;
+    
+    // Re-chequeamos IS_DEV antes de vaciar
+    IS_DEV = checkIsDev();
+
+    const content = logBuffer.join('');
+    logBuffer = [];
+
+    if (IS_DEV) {
+      try {
+        const resp = await fetch('/api/write-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: content })
+        });
+        if (!resp.ok) throw new Error('Proxy no disponible');
+      } catch (e) {
+        // En caso de error en el fetch, si detectamos que quizá no somos DEV,
+        // guardamos el contenido para el siguiente intento pero no lo perdemos
+        logBuffer.unshift(content);
+        originalConsole.warn('[SHIM] Error vaciando buffer de logs (DEV):', e.message);
+      }
+      return;
+    }
+
+    if (!globalThis.Neutralino || !globalThis.Neutralino.filesystem) {
+      logBuffer.unshift(content);
+      return;
+    }
+
+    // Asegurar que usamos una ruta absoluta si NL_PATH existe
+    const base = globalThis.NL_PATH || '.';
+    const logPath = (base + '/app-debug.log').replace(/\\/g, '/').replace(/\/+/g, '/');
+
+    originalConsole.log(`[SHIM] Escribiendo ${content.length} bytes de log a: ${logPath}`);
+
+    try {
+      // Nos aseguramos de que logPath no tenga barras duplicadas y sea absoluta
+      const cleanPath = logPath.replace(/\/+/g, '/');
+      
+      // Intentar append, si falla (ej. archivo no existe), intentar writeFile
+      await globalThis.Neutralino.filesystem.appendFile(cleanPath, content)
+        .catch(async (err) => {
+          originalConsole.log(`[SHIM] falló append (${err.code}), intentando writeFile...`);
+          await globalThis.Neutralino.filesystem.writeFile(cleanPath, content);
+        });
+    } catch (e) {
+      originalConsole.error('[SHIM] Error crítico escribiendo log a:', logPath, e);
+    }
+  };
+
+  const logToFile = (level, ...args) => {
+    const timestamp = new Date().toISOString();
     const message = args.map(arg => {
       try {
-        if (arg instanceof Error) {
-          return `${arg.message}\nStack: ${arg.stack}`;
-        }
-        // Manejar objetos que podrían ser errores pero no pasan el instanceof
-        if (arg && typeof arg === 'object' && arg.stack && arg.message) {
-          return `${arg.message}\nStack: ${arg.stack}`;
-        }
+        if (arg instanceof Error) return `${arg.message}\nStack: ${arg.stack}`;
         return typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg);
       } catch(e) { return String(arg); }
     }).join(' ');
     
     const logLine = `[${timestamp}] [${level}] ${message}\n`;
 
-    // 1. Guardar en archivo local (si estamos en producción Neutralino)
-    if (window.Neutralino && window.Neutralino.filesystem) {
-      try {
-        // Usar appendFile para no sobrescribir
-        await window.Neutralino.filesystem.appendFile(neutralinoRoot + '/app-debug.log', logLine);
-      } catch (e) {
-        // Fallback silencioso si el sistema de archivos no está listo
+    // 1. Mostrar en la consola original
+    const logMethod = level.toLowerCase() === 'error' ? 'error' : (level.toLowerCase() === 'warn' ? 'warn' : 'log');
+    if (originalConsole[logMethod]) originalConsole[logMethod](message);
+
+    // 2. Guardar en archivo
+    IS_DEV = checkIsDev();
+
+    if (IS_DEV) {
+      // Intentar envío directo si no hay buffer acumulado
+      if (logBuffer.length === 0) {
+        fetch('/api/write-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: logLine })
+        }).catch(() => logBuffer.push(logLine));
+      } else {
+        logBuffer.push(logLine);
       }
+    } else if (globalThis.Neutralino && globalThis.Neutralino.filesystem && neutralinoReady) {
+      // Si ya estamos listos, podemos intentar vaciar el buffer + la línea actual
+      logBuffer.push(logLine);
+      flushBuffer();
+    } else {
+      logBuffer.push(logLine);
     }
 
-    // 2. Enviar a la consola nativa de Neutralino (si existe y tiene permisos)
-    if (window.Neutralino && window.Neutralino.debug) {
-      try {
-        window.Neutralino.debug.log(logLine, level === 'ERROR' ? 'ERROR' : (level === 'WARN' ? 'WARNING' : 'INFO'))
-          .catch(() => { /* Evitar errores de permisos no capturados */ });
-      } catch (e) { /* Silencioso */ }
+    // 3. Enviar a nativo (Solo si no es DEV)
+    if (!IS_DEV && globalThis.Neutralino && globalThis.Neutralino.debug && (neutralinoReady || globalThis.NL_TOKEN)) {
+      globalThis.Neutralino.debug.log(logLine, level === 'ERROR' ? 'ERROR' : (level === 'WARN' ? 'WARNING' : 'INFO')).catch(()=>{});
     }
 
-    // 3. Empujar al sistema de logs visual de la UI
-    if (window.__neutralino_push_log) {
-      window.__neutralino_push_log({ 
-        timestamp: Date.now(), 
-        level: level === 'INFO' ? 'INFO' : level, 
-        message: message 
-      });
+    // 4. UI
+    if (globalThis.__neutralino_log_cb) {
+      globalThis.__neutralino_log_cb({ timestamp: Date.now(), level, message });
     }
   };
 
-  // Interceptar métodos de consola
-  console.log = (...args) => { logToFile('INFO', ...args); originalConsole.log.apply(console, args); };
-  console.warn = (...args) => { logToFile('WARN', ...args); originalConsole.warn.apply(console, args); };
-  console.error = (...args) => { logToFile('ERROR', ...args); originalConsole.error.apply(console, args); };
-  console.info = (...args) => { logToFile('INFO', ...args); originalConsole.info.apply(console, args); };
-  // ------------------------------------
+  // Interceptar consola de inmediato
+  console.log = (...args) => logToFile('INFO', ...args);
+  console.warn = (...args) => logToFile('WARN', ...args);
+  console.error = (...args) => logToFile('ERROR', ...args);
+  console.info = (...args) => logToFile('INFO', ...args);
 
+  console.log('[SHIM] Cargando Neutralino Shim v1.3.2 (Production Fix)');
+
+  // En modo DEV, vaciamos el buffer inicial casi de inmediato
+  if (checkIsDev()) {
+    setTimeout(flushBuffer, 500);
+  }
+
+  // --- INICIALIZACIÓN DE NEUTRALINO ---
+  const initNeutralino = () => {
+    if(typeof Neutralino !== 'undefined') {
+      try {
+        Neutralino.init();
+        
+        const onReady = () => {
+          if (neutralinoReady) return;
+          neutralinoReady = true;
+          const pathLog = (globalThis.NL_PATH || '.') + '/app-debug.log';
+          
+          // Usar originalConsole directamente para este mensaje crítico
+          originalConsole.log(`[SHIM] Neutralino Runtime Ready (NL_PATH: ${globalThis.NL_PATH})`);
+          originalConsole.log(`[SHIM] Logs persistentes activados en: ${pathLog}`);
+          
+          flushBuffer();
+        };
+
+        // Escuchar el evento oficial de Neutralino
+        if (Neutralino.events) {
+          Neutralino.events.on('ready', onReady);
+        }
+
+        // Fallback: si el token ya está o pasa tiempo, forzar onReady
+        if (globalThis.NL_TOKEN) {
+          setTimeout(onReady, 100);
+        } else {
+          let retries = 0;
+          const checkToken = () => {
+            if (globalThis.NL_TOKEN || retries > 20) onReady();
+            else { retries++; setTimeout(checkToken, 100); }
+          };
+          checkToken();
+        }
+      } catch (e) {
+        originalConsole.error('[SHIM] Error inicializando Neutralino:', e);
+      }
+    } else if (!IS_DEV) {
+      // En producción, si no está Neutralino, reintentamos un poco (por si el script tarda)
+      console.log('[SHIM] Esperando a que el SDK de Neutralino esté disponible...');
+      setTimeout(initNeutralino, 100);
+    }
+  };
+
+  initNeutralino();
+  
+  // Detectar raíz real en Neutralino (NL_PATH es el directorio del binary)
+  // En producción (dist), appRoot DEBE ser NL_PATH para encontrar bin/ y services.json
+  const neutralinoRoot = globalThis.NL_PATH || '.';
+  let appRoot = neutralinoRoot;
+
+  // Solo ajustar appRoot si estamos en desarrollo CON Neutralino y queremos ver la carpeta del proyecto
+  // Pero para una distribución (dist), NL_PATH ya es el lugar correcto.
+  if (!globalThis.NL_TOKEN && globalThis.NL_PATH && globalThis.NL_PATH.includes('dist')) {
+    appRoot = globalThis.NL_PATH.replace(/[\\/]dist[\\/].*$/, '') || '.';
+    console.log('[SHIM] Detectado modo desarrollo con binario en dist, ajustando appRoot a:', appRoot);
+  } else {
+    console.log('[SHIM] Usando raíz de aplicación:', appRoot);
+  }
+
+  // Flag global para evitar saturación durante instalaciones
+  globalThis.__is_installing = false;
+
+  // SI YA EXISTE electronAPI (estamos en Electron), no sobreescribir
+  // Pero podemos registrar el shim para que los logs funcionen en Electron también si se desea
+  if (typeof globalThis.electronAPI !== 'undefined' && !globalThis.NL_TOKEN) {
+    console.log('[SHIM] Detectado Electron, saltando implementación de globalThis.electronAPI');
+    return;
+  }
+  
   const defaultConfig = { 
     basePath: appRoot, 
     projectsPath: appRoot + '\\www', 
@@ -102,31 +225,53 @@
     if (servicesPromise) return servicesPromise;
 
     servicesPromise = (async () => {
-      const paths = ['/services.json', 'services.json', './services.json', '../services.json', '/www/services.json'];
-      for (const path of paths) {
+      // 1. Intentar via fetch (ideal para desarrollo y si el server de Neutralino responde)
+      const fetchPaths = ['/services.json', 'services.json', './services.json', '/www/services.json'];
+      for (const path of fetchPaths) {
         try {
-          console.log(`[SHIM] Intentando cargar servicios desde: ${path}`);
+          console.log(`[SHIM] Intentando fetch servicios desde: ${path}`);
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 2000);
-          
+          const timeoutId = setTimeout(() => controller.abort(), 1000);
           const res = await fetch(path, { cache: 'no-store', signal: controller.signal });
           clearTimeout(timeoutId);
-          
           if (res.ok) {
             const data = await res.json();
             const list = Array.isArray(data) ? data : (data && Array.isArray(data.services) ? data.services : []);
             if (list.length > 0) {
-              console.log(`[SHIM] Servicios cargados correctamente (${list.length}) desde ${path}`);
-              console.log('[SHIM] Primer servicio:', list[0].name);
+              console.log(`[SHIM] Servicios cargados via fetch desde ${path}`);
               cachedServices = list;
               return list;
             }
           }
-        } catch (e) {
-          console.warn(`[SHIM] Fallo al cargar desde ${path}:`, e.message);
+        } catch (e) {}
+      }
+
+      // 2. Fallback: Intentar viafilesystem (En producción)
+      if (globalThis.Neutralino && globalThis.Neutralino.filesystem) {
+        const fsPaths = [
+          (globalThis.NL_PATH || '.') + '/services.json',
+          './services.json',
+          'services.json'
+        ];
+        for (const p of fsPaths) {
+          try {
+            const normalized = p.replace(/\\/g, '/');
+            console.log(`[SHIM] Intentando leer servicios via FS: ${normalized}`);
+            const content = await globalThis.Neutralino.filesystem.readFile(normalized);
+            if (content) {
+              const data = JSON.parse(content);
+              const list = Array.isArray(data) ? data : (data && Array.isArray(data.services) ? data.services : []);
+              if (list.length > 0) {
+                console.log(`[SHIM] Servicios cargados via FS desde ${normalized}`);
+                cachedServices = list;
+                return list;
+              }
+            }
+          } catch (e) {}
         }
       }
-      console.warn('[SHIM] Ningún services.json encontrado, se usará el fallback');
+
+      console.warn('[SHIM] Ningún services.json encontrado');
       return [];
     })();
 
@@ -135,31 +280,26 @@
 
   async function fileExists(path){
     try{
-      console.log('[SHIM] fileExists verificando:', path);
-      
       // En desarrollo, usar Node.js backend. En Neutralino PROD usar filesystem
-      const isDev = !window.NL_TOKEN && (window.location.port === '5173' || window.location.hostname === 'localhost');
-      if(isDev){
-        console.log('[SHIM] Modo DEV - usando /api/file-exists');
+      if(checkIsDev()){
         const response = await fetch('/api/file-exists', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path })
         });
         const result = await response.json();
-        console.log('[SHIM] fileExists resultado DEV:', result);
         return result.exists === true;
       }
       
       // En producción, usar Neutralino
-      if(window.Neutralino && Neutralino.filesystem){
+      if(globalThis.Neutralino && globalThis.Neutralino.filesystem){
         try {
-          if (typeof Neutralino.filesystem.exists === 'function') {
-            const res = await Neutralino.filesystem.exists(path);
+          if (typeof globalThis.Neutralino.filesystem.exists === 'function') {
+            const res = await globalThis.Neutralino.filesystem.exists(path.replace(/\\/g, '/'));
             if(typeof res === 'boolean') return res;
             if(res && typeof res.exists === 'boolean') return res.exists;
           }
-          await Neutralino.filesystem.getStats(path);
+          await globalThis.Neutralino.filesystem.getStats(path.replace(/\\/g, '/'));
           return true;
         } catch(e) {
           return false;
@@ -173,26 +313,21 @@
 
   async function readDir(path){
     try{
-      console.log('[SHIM] readDir leyendo:', path);
-      
-      const isDev = !window.NL_TOKEN && (window.location.port === '5173' || window.location.hostname === 'localhost');
-      if(isDev){
-        console.log('[SHIM] Modo DEV - usando /api/read-dir');
+      if(checkIsDev()){
         const response = await fetch('/api/read-dir', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path })
         });
         const result = await response.json();
-        console.log('[SHIM] readDir resultado DEV:', result);
         return result.entries || null;
       }
       
       // En producción, usar Neutralino
-      if(window.Neutralino && Neutralino.filesystem && Neutralino.filesystem.readDirectory){
-        const res = await Neutralino.filesystem.readDirectory(path);
-        console.log('[SHIM] readDir resultado:', res);
+      if(globalThis.Neutralino && globalThis.Neutralino.filesystem && globalThis.Neutralino.filesystem.readDirectory){
+        const res = await globalThis.Neutralino.filesystem.readDirectory(path.replace(/\\/g, '/'));
         if(Array.isArray(res)) return res;
+        if(res && Array.isArray(res.entries)) return res.entries;
         if(res && Array.isArray(res.entries)) return res.entries;
         return [];
       }
@@ -289,12 +424,12 @@
   }
   function safeOpen(url){
     try{
-      if(window.Neutralino && Neutralino.os && Neutralino.os.open){
-        Neutralino.os.open(url);
+      if(globalThis.Neutralino && globalThis.Neutralino.os && globalThis.Neutralino.os.open){
+        globalThis.Neutralino.os.open(url);
         return;
       }
     }catch(e){}
-    window.open(url, '_blank');
+    globalThis.open(url, '_blank');
   }
 
   // Cache para netstat
@@ -494,7 +629,7 @@
       
       // Timeout de 5000ms por servicio (aumentado para evitar falsos positivos durante carga)
       // Si estamos instalando algo, aumentamos a 15s para no interferir
-      const timeoutMs = window.__is_installing ? 15000 : 5000;
+      const timeoutMs = globalThis.__is_installing ? 15000 : 5000;
       
       return Promise.race([
         statusPromise,
@@ -518,26 +653,19 @@
     }
     try{
       // En desarrollo (puerto 5173), usar siempre /api/exec
-      const isDev = !window.NL_TOKEN && (window.location.port === '5173' || window.location.hostname === 'localhost');
-      
-      if (isDev) {
-        console.log('[SHIM] Usando /api/exec (dev) para:', cmd);
+      if (checkIsDev()) {
         const response = await fetch('/api/exec', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command: cmd })
         });
         const result = await response.json();
-        console.log('[SHIM] /api/exec resultado:', result);
         return result;
       }
       
       // En producción con Neutralino runtime
-      if(window.Neutralino && Neutralino.os && Neutralino.os.execCommand){
-        console.log('[SHIM] Usando Neutralino.os.execCommand para:', cmd);
-        // En Neutralino v5/v6 execCommand prefiere STRING
-        const result = await (typeof cmd === 'string' ? Neutralino.os.execCommand(cmd) : Neutralino.os.execCommand({ command: cmd }));
-        // Normalizar salida (Neutralino suele usar stdOut/stdErr)
+      if(globalThis.Neutralino && globalThis.Neutralino.os && globalThis.Neutralino.os.execCommand){
+        const result = await globalThis.Neutralino.os.execCommand(cmd);
         return {
           stdout: result.stdOut || result.stdout || '',
           stderr: result.stdErr || result.stderr || '',
@@ -551,7 +679,7 @@
     throw new Error('No execution method available');
   }
 
-  window.electronAPI = {
+  globalThis.electronAPI = {
     getServices: async (hiddenServices)=>{
       const startTime = Date.now();
       console.log('[SHIM] >>> getServices INICIO');
@@ -735,21 +863,12 @@
           if(!phpBin){
             const errorMsg = 'Apache requiere PHP instalado (php.exe no encontrado)';
             console.error('[SHIM] ERROR:', errorMsg);
-            window.__neutralino_push_log && window.__neutralino_push_log({ 
-              timestamp: Date.now(), 
-              level: 'ERROR', 
-              message: errorMsg
-            });
             throw new Error(errorMsg);
           }
           console.log('[SHIM] ✓ PHP verificado:', phpBin);
         }
         
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), 
-          level: 'INFO', 
-          message: `Iniciando ${serviceName}...` 
-        });
+        console.info(`Iniciando ${serviceName}...`);
         
         // Limpiar procesos antiguos primero
         console.log('[SHIM] Limpiando procesos antiguos de', exe);
@@ -827,23 +946,14 @@
         // Invalidar caché de netstat porque el puerto puede estar en transición
         invalidateNetstatCache();
         
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), 
-          level: 'INFO', 
-          message: `${serviceName} iniciado correctamente` 
-        });
+        console.info(`${serviceName} iniciado correctamente`);
         
         console.log('[SHIM] ✓ Servicio', serviceName, 'iniciado exitosamente');
         console.log('[SHIM] ============ startService FIN ============');
         return { success: true, message: `${serviceName} started` };
       }catch(e){
         const errorMsg = e.message || String(e);
-        console.error('[SHIM] Error en startService:', errorMsg);
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), 
-          level: 'ERROR', 
-          message: `Error al iniciar servicio: ${errorMsg}` 
-        });
+        console.error(`Error al iniciar servicio: ${errorMsg}`);
         return { success: false, message: errorMsg };
       }
     },
@@ -880,7 +990,7 @@
           throw new Error(`Tipo de servicio no soportado: ${type}`);
         }
         
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
+        globalThis.__neutralino_push_log && globalThis.__neutralino_push_log({ 
           timestamp: Date.now(), 
           level: 'INFO', 
           message: `Deteniendo ${serviceName}...` 
@@ -927,21 +1037,12 @@
         // Invalidar caché de netstat porque los puertos cambian
         invalidateNetstatCache();
         
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), 
-          level: 'INFO', 
-          message: `${serviceName} detenido correctamente` 
-        });
+        console.log(`${serviceName} detenido correctamente`);
         
         return { success: true, message: `${serviceName} stopped` };
       }catch(e){
         const errorMsg = e.message || String(e);
-        console.error('Error stopping service:', e);
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), 
-          level: 'ERROR', 
-          message: `Error al detener servicio: ${errorMsg}` 
-        });
+        console.error(`Error al detener servicio: ${errorMsg}`, e);
         return { success: false, message: errorMsg };
       }
     },
@@ -957,44 +1058,59 @@
     setConfig: async (cfg)=>{
       try{ localStorage.setItem('WebServDev-config', JSON.stringify(cfg)); return true; }catch(e){return false}
     },
-    getLogs: async ()=>{
-      try{
-        const res = await fetch('/neutralino/app.log');
-        if(res.ok) {
-          const text = await res.text();
-          // Parsear el texto de logs a un formato estructurado
-          if (!text || text.trim() === '') return [];
-          const lines = text.split('\n').filter(l => l.trim());
-          return lines.map(line => {
-            // Intentar parsear formato: [timestamp] [level] mensaje
-            const match = line.match(/\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.*)/);
-            if (match) {
-              return {
-                timestamp: new Date(match[1]).getTime(),
-                level: match[2],
-                message: match[3]
-              };
-            }
-            // Si no coincide, devolver un log genérico
-            return {
-              timestamp: Date.now(),
-              level: 'INFO',
-              message: line
-            };
-          });
+    getLogs: async () => {
+      try {
+        if (globalThis.Neutralino && globalThis.Neutralino.filesystem) {
+          const logPath = globalThis.NL_TOKEN ? (globalThis.NL_PATH || '.') + '/app-debug.log' : './app-debug.log';
+          try {
+            const text = await globalThis.Neutralino.filesystem.readFile(logPath);
+            if (!text || text.trim() === '') return [];
+            
+            const lines = text.split('\n').filter(l => l.trim());
+            return lines.map(line => {
+              const match = line.match(/\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.*)/);
+              if (match) {
+                return {
+                  timestamp: new Date(match[1]).getTime() || Date.now(),
+                  level: match[2],
+                  message: match[3]
+                };
+              }
+              return { timestamp: Date.now(), level: 'INFO', message: line };
+            });
+          } catch (e) {
+            // Si el archivo no existe, devolvemos array vacío
+            return [];
+          }
         }
-      }catch(e){}
-      return [];
+        return [];
+      } catch (e) {
+        console.warn('[SHIM] Error al leer logs:', e);
+        return [];
+      }
+    },
+    clearLogs: async () => {
+      try {
+        if (globalThis.Neutralino && globalThis.Neutralino.filesystem) {
+          const logPath = globalThis.NL_TOKEN ? (globalThis.NL_PATH || '.') + '/app-debug.log' : './app-debug.log';
+          await globalThis.Neutralino.filesystem.writeFile(logPath, '');
+          console.log('[SHIM] Logs limpiados correctamente');
+          return true;
+        }
+      } catch (e) {
+        console.error('[SHIM] Error al limpiar logs:', e);
+      }
+      return false;
     },
     openInBrowser: (url)=>{ safeOpen(url); },
     onLog: (cb)=>{
       // no native stream; return a remover function
-      window.__neutralino_log_cb = cb;
-      return ()=>{ window.__neutralino_log_cb = null };
+      globalThis.__neutralino_log_cb = cb;
+      return ()=>{ globalThis.__neutralino_log_cb = null };
     },
     openAppFolder: async () => {
       try {
-        const root = window.NL_PATH || '.';
+        const root = globalThis.NL_PATH || '.';
         await execCommand(`explorer "${root}"`);
       } catch(e) { console.error(e); }
     },
@@ -1026,7 +1142,7 @@
     installService: async (data) => {
       console.log('[SHIM] ============ installService INICIO ============');
       console.log('[SHIM] Datos recibidos:', data);
-      window.__is_installing = true;
+      globalThis.__is_installing = true;
       
       try {
         let service, zipUrl;
@@ -1056,13 +1172,10 @@
         const tmpDir = `${basePath}\\tmp`.replace(/\\\\/g, '\\');
         const tmpZipPath = `${tmpDir}\\${service.type}-${cleanVersion}.zip`.replace(/\\\\/g, '\\').replace(/\s+/g, '_');
 
-        console.log('[SHIM] Instalando:', service.name, 'v', service.version);
-        console.log('[SHIM] Destino Final:', destDir);
+        console.log(`[SHIM] Instalando: ${service.name} v${service.version}`);
+        console.log(`[SHIM] Destino Final: ${destDir}`);
         
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), level: 'INFO', 
-          message: `Iniciando instalación de ${service.name} ${service.version}...` 
-        });
+        console.info(`Iniciando instalación de ${service.name} ${service.version}...`);
 
         await execCommand(`cmd /C if not exist "${tmpDir}" mkdir "${tmpDir}"`);
         await execCommand(`cmd /C if not exist "${destDir}" mkdir "${destDir}"`);
@@ -1073,14 +1186,18 @@
 
         console.log('[SHIM] Intentando descarga con PowerShell...');
         try {
-          const psDownloadCmd = `powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; iwr -Uri '${zipUrl}' -OutFile '${tmpZipPath}' -TimeoutSec 300"`;
+          // Cambiamos 'powershell' por 'powershell.exe' y aseguramos que el comando use comillas dobles externas para los parámetros
+          const psDownloadCmd = `powershell.exe -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri '${zipUrl}' -OutFile '${tmpZipPath}' -TimeoutSec 300"`;
+          console.log('[SHIM] CMD:', psDownloadCmd);
           const psRes = await execCommand(psDownloadCmd);
           if (psRes.exitCode === 0) {
             downloadSuccess = true;
           } else {
+            console.error('[SHIM] PowerShell error (exitCode ' + psRes.exitCode + '):', psRes.stderr);
             lastError = psRes.stderr;
           }
         } catch (e) {
+          console.error('[SHIM] PowerShell catch error:', e.message);
           lastError = e.message;
         }
 
@@ -1091,45 +1208,40 @@
             if (curlRes.exitCode === 0) {
               downloadSuccess = true;
             } else {
+              console.error('[SHIM] Curl error:', curlRes.stderr);
               lastError = curlRes.stderr || `Code ${curlRes.exitCode}`;
             }
           } catch (e) {
+            console.error('[SHIM] Curl catch error:', e.message);
             lastError = e.message;
           }
         }
 
         if (!downloadSuccess) throw new Error(`Error de descarga: ${lastError}`);
 
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), level: 'INFO', 
-          message: `Extrayendo archivos...` 
-        });
+        console.info('Extrayendo archivos...');
 
         console.log('[SHIM] Extrayendo...');
-        const extractRes = await execCommand(`powershell -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '${tmpZipPath}' -DestinationPath '${destDir}' -Force"`);
+        // Usamos shell de cmd para llamar a powershell y asegurar redirección de errores
+        const extractRes = await execCommand(`powershell.exe -NoProfile -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '${tmpZipPath}' -DestinationPath '${destDir}' -Force"`);
 
         if (extractRes.exitCode !== 0) {
+          console.error('[SHIM] Error Expand-Archive:', extractRes.stderr);
           const tarRes = await execCommand(`tar -xf "${tmpZipPath}" -C "${destDir}"`);
-          if (tarRes.exitCode !== 0) throw new Error(`Error extracción: ${extractRes.stderr || tarRes.stderr}`);
+          if (tarRes.exitCode !== 0) {
+            console.error('[SHIM] Error TAR:', tarRes.stderr);
+            throw new Error(`Error extracción: ${extractRes.stderr || tarRes.stderr}`);
+          }
         }
 
         try { await execCommand(`cmd /C del "${tmpZipPath}"`); } catch(e) {}
 
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), level: 'SUCCESS', 
-          message: `${service.name} v${service.version} instalado correctamente.` 
-        });
+        console.info(`${service.name} v${service.version} instalado correctamente.`);
 
         console.log('[SHIM] Instalación finalizada');
         return { success: true, message: `${service.name} instalado` };
-      } catch (e) {
-        console.error('[SHIM] Error:', e);
-        window.__neutralino_push_log && window.__neutralino_push_log({ 
-          timestamp: Date.now(), level: 'ERROR', message: `Fallo: ${e.message}` 
-        });
-        return { success: false, message: e.message };
       } finally {
-        window.__is_installing = false;
+        globalThis.__is_installing = false;
       }
     },
     updateServiceVersion: async (type, version) => {
@@ -1153,7 +1265,7 @@
     },
     openTerminal: async () => {
       try {
-        const root = window.NL_PATH || '.';
+        const root = globalThis.NL_PATH || '.';
         await execCommand(`cmd.exe /K "cd /d ${root}"`);
       } catch(e) { console.error(e); }
     },
@@ -1164,9 +1276,4 @@
       await execCommand('control sysdm.cpl,,3');
     }
   };
-
-  // optional: expose a helper to push logs to UI during dev
-  window.__neutralino_push_log = function(log){
-    if(window.__neutralino_log_cb) window.__neutralino_log_cb(log);
-  }
 })();

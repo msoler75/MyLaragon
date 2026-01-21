@@ -4,14 +4,18 @@
 WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servidores locales en Windows. Utiliza React + Tailwind CSS 4 en el frontend.
 
 ## Arquitectura Crítica
-- **El Shim (`neutralino/neutralino-shim.js`)**: Es la pieza central. Unifica las APIs de Neutralino y Electron. El frontend llama a `window.electronAPI`, que el shim implementa inyectando lógica sobre Neutralino o redirigiendo a Electron.
+- **El Shim (`src/neutralino/neutralino-shim.js`)**: Es la pieza central. Unifica las APIs de Neutralino y Electron. El frontend llama a `window.electronAPI`, que el shim implementa inyectando lógica sobre Neutralino o redirigiendo a Electron.
 - **Modo Proxy (Desarrollo)**: En modo `npm run dev` (Vite), el Shim detecta la ausencia de `NL_TOKEN` y redirige las llamadas de OS/Filesystem a endpoints `/api/...` definidos en `vite.config.js`.
 
 ## Reglas de Oro (No Ignorar)
-1. **Política de No Duplicación**:
-   - NUNCA edites archivos dentro de `neutralino/www/`. Son volátiles y se generan/copian/enlazan durante el build.
-   - Edita siempre el origen en la raíz o en `neutralino/`.
-   - Si detectas inconsistencias entre archivos con el mismo nombre, usa `scripts/create-symlinks.js`.
+0. **DRY extremo**
+   - No debe haber funcionalidades duplicadas en toda la app.
+   - Si encuentras código similar o idéntico en dos lugares, refactoriza para crear una función/utilidad/componente/servicio compartido.
+
+1. **Política de Fuente Única de Verdad (Single Source of Truth)**:
+   - NUNCA edites archivos dentro de `neutralino/www/`. Son volátiles y se generan por el script de sincronización.
+   - La fuente de verdad absoluta está en `src/neutralino/` (Shim, Services, Bootstrap).
+   - El script `scripts/create-symlinks.js` sincroniza estos archivos hacia `www/` realizando copias físicas para compatibilidad con Windows.
 
 2. **Manejo de Rutas**:
    - Usa `basePath` (desde `app.ini` o config) para localizar binarios en `/bin`.
@@ -34,9 +38,15 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
    - La definición de servicios instalables está en `services.json`.
    - La detección de binarios debe seguir el patrón de búsqueda en `bin/<tipo>/<versión>/<ejecutable>`.
 
+6- **Tests realistas**
+   - Las pruebas unitarias deben de probar partes reales del sistema, no mocks maquillados.
+   - Si los test se cumplen, la app se debe comportar igual en producción.
+   - Los tests nunca NUNCA NUNCA JAMÁS deben hacer "trampas" para validarses (ej. mockear la existencia de binarios, respuestas falsas de ejecución de comandos).
+   - Se deben escribir tantos test como hagan falta para cubrir los flujos críticos (instalación, detección, ejecución de comandos, logs).
+
 ## Workflows Comunes
 - **Fix Duplication**: Ejecutar `node scripts/create-symlinks.js`.
-- **Detección de Servicios**: Revisar `electron/services-detector.js` para lógica de puertos y `neutralino/neutralino-shim.js` para ejecución de comandos.
+- **Detección de Servicios**: Revisar `electron/services-detector.js` para lógica de puertos y `src/neutralino/neutralino-shim.js` para ejecución de comandos.
 - **Debugging Proactivo**: Si una prueba o comando falla, lee las últimas 50 líneas de `app-debug.log` antes de proponer cambios.
 - **Testing**: Usa `vitest` para lógica pura y `npm run test` para integración (activa `RUN_SLOW=1` para testear con binarios reales).
 
