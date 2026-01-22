@@ -72,6 +72,21 @@ export class FilesystemAdapter {
   }
 
   async fileExists(path) {
+    if (this.isDev) {
+      try {
+        const response = await fetch('/api/file-exists', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path })
+        });
+        if (!response.ok) return false;
+        const data = await response.json();
+        return data.exists || false;
+      } catch {
+        return false;
+      }
+    }
+    
     try {
       await this.readFile(path);
       return true;

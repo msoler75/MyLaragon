@@ -174,7 +174,8 @@ export async function getAvailableVersions(fsAdapter, appPath, serviceType) {
       const binPath = path.join(root, 'bin', type);
       if (await fsAdapter.fileExists(binPath)) {
         try {
-          const entries = await fsAdapter.readDir(binPath);
+          const result = await fsAdapter.readDir(binPath);
+          const entries = result.entries || result; // Adaptador devuelve { entries: [...] }
           const dirs = [];
           for (const entry of entries) {
             const entryName = typeof entry === 'string' ? entry : entry.entry;

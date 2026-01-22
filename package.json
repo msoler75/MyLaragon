@@ -6,7 +6,7 @@
   "author": "msoler75",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node src/api/dev-server.js\" \"npx kill-port 5173 && wait-on http://localhost:5174 --timeout 10000 && vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 --timeout 20000 && npm run neutralino-dev\"",
+    "dev": "concurrently \"node src/api/dev-server.js\" \"npx kill-port 5173 && wait-on http://localhost:5174/health --timeout 10000 && vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 --timeout 20000 && npm run neutralino-dev\"",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

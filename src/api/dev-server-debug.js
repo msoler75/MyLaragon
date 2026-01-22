@@ -55,30 +55,6 @@ const nodeAdapter = {
       console.log('[ADAPTER] fileExists: false');
       return { exists: false };
     }
-  },
-
-  async readFile(filePath) {
-    console.log('[ADAPTER] readFile called:', filePath);
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      console.log('[ADAPTER] readFile success:', content.length, 'bytes');
-      return content;
-    } catch (err) {
-      console.error('[ADAPTER] readFile error:', err);
-      throw err;
-    }
-  },
-
-  async writeFile(filePath, content) {
-    console.log('[ADAPTER] writeFile called:', filePath);
-    try {
-      await fs.writeFile(filePath, content, { flag: 'a' }); // append mode
-      console.log('[ADAPTER] writeFile success');
-      return { success: true };
-    } catch (err) {
-      console.error('[ADAPTER] writeFile error:', err);
-      throw err;
-    }
   }
 };
 
@@ -98,15 +74,11 @@ const server = http.createServer((req, res) => {
     return;
   }
   
-  // Health check (support both GET and HEAD for wait-on)
-  if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
+  // Health check
+  if (req.url === '/health' && req.method === 'GET') {
     console.log('[REQUEST] Handling /health');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    if (req.method === 'GET') {
-      res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
-    } else {
-      res.end(); // HEAD requests don't send body
-    }
+    res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
     console.log('[REQUEST] /health response sent');
     return;
   }
@@ -183,81 +155,6 @@ const server = http.createServer((req, res) => {
     return;
   }
   
-  // Read file endpoint
-  if (req.url === '/api/read-file' && req.method === 'POST') {
-    console.log('[REQUEST] Handling /api/read-file');
-    let body = '';
-    
-    req.on('data', chunk => {
-      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
-      body += chunk.toString();
-    });
-    
-    req.on('end', async () => {
-      try {
-        console.log('[REQUEST] Body complete:', body);
-        const { path: filePath } = JSON.parse(body);
-        console.log('[REQUEST] Parsed filePath:', filePath);
-        
-        const content = await nodeAdapter.readFile(filePath);
-        console.log('[REQUEST] Read', content.length, 'bytes');
-        
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end(content);
-        console.log('[REQUEST] /api/read-file response sent');
-      } catch (err) {
-        console.error('[REQUEST] /api/read-file error:', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
-    });
-    
-    req.on('error', (err) => {
-      console.error('[REQUEST] Request error:', err);
-    });
-    
-    return;
-  }
-  
-  // Write log endpoint
-  if (req.url === '/api/write-log' && req.method === 'POST') {
-    console.log('[REQUEST] Handling /api/write-log');
-    let body = '';
-    
-    req.on('data', chunk => {
-      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
-      body += chunk.toString();
-    });
-    
-    req.on('end', async () => {
-      try {
-        console.log('[REQUEST] Body complete:', body);
-        const { message } = JSON.parse(body);
-        console.log('[REQUEST] Log message:', message);
-        
-        const logPath = path.join(basePath, '..', 'app-debug.log');
-        const timestamp = new Date().toISOString();
-        const logLine = `[${timestamp}] ${message}\n`;
-        
-        await nodeAdapter.writeFile(logPath, logLine);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-        console.log('[REQUEST] /api/write-log response sent');
-      } catch (err) {
-        console.error('[REQUEST] /api/write-log error:', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
-    });
-    
-    req.on('error', (err) => {
-      console.error('[REQUEST] Request error:', err);
-    });
-    
-    return;
-  }
-  
   // 404
   console.log('[REQUEST] 404 Not Found');
   res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -280,6 +177,6 @@ server.on('connection', (socket) => {
 const PORT = 5174;
 server.listen(PORT, () => {
   console.log(`[SERVER] 🚀 Debug API Server running on http://localhost:${PORT}`);
-  console.log('[SERVER] Endpoints: /health, /api/read-dir, /api/file-exists, /api/read-file, /api/write-log');
+  console.log('[SERVER] Endpoints: /health, /api/read-dir, /api/file-exists');
   console.log('[SERVER] Ready to accept requests');
 });

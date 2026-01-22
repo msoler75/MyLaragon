@@ -74,6 +74,29 @@ Todo el código de negocio reside en **[src/neutralino/lib/](src/neutralino/lib/
          └───────────────────────────┘
 ```
 
+## DEV. Flujo de Datos Completo
+
+Usuario abre app
+    ↓
+Neutralino muestra: http://localhost:5173
+    ↓
+Vite sirve: React + Shim
+    ↓
+React llama: window.electronAPI.getServices()
+    ↓
+Shim llama: detectServices() de lib/
+    ↓
+lib/ necesita leer filesystem
+    ↓
+fsAdapter.readDir() hace: fetch('/api/read-dir')
+    ↓
+Vite proxy redirige a: http://localhost:5174/api/read-dir
+    ↓
+dev-server.js ejecuta: fs.readdir() real
+    ↓
+Respuesta sube por toda la cadena
+
+
 ---
 
 ## Flujo de Datos en DEV
