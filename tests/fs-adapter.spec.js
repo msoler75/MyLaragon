@@ -40,12 +40,14 @@ describe("Filesystem Adapter (Node.js)", () => {
     fs.writeFileSync(path.join(tmpDir, "file2.txt"), "b");
     fs.mkdirSync(path.join(tmpDir, "subdir"));
     
-    const entries = await fsAdapter.readDir(tmpDir);
+    const result = await fsAdapter.readDir(tmpDir);
+    const entries = result.entries || result;
+    const names = entries.map(entry => typeof entry === 'string' ? entry : entry.entry);
     
     assert.ok(Array.isArray(entries));
-    assert.ok(entries.includes("file1.txt"));
-    assert.ok(entries.includes("file2.txt"));
-    assert.ok(entries.includes("subdir"));
+    assert.ok(names.includes("file1.txt"));
+    assert.ok(names.includes("file2.txt"));
+    assert.ok(names.includes("subdir"));
   });
 
   test("fileExists debe detectar archivos existentes", async () => {

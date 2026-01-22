@@ -53,7 +53,7 @@ describe('Integridad del motor de detección REAL', () => {
     assert.ok(versions.includes('2.4.58'));
 
     const binPath = await getServiceBinPath(fsAdapter, tmpDir, 'apache', '2.4.58');
-    assert.ok(binPath && binPath.includes('Apache24\\bin'), 'No detectó la subcarpeta /bin de Apache');
+    assert.ok(binPath && binPath.includes('Apache24/bin'), 'No detectó la subcarpeta /bin de Apache');
   });
 
   it('reproduce el flujo completo: instalar PHP, Apache y verificar dependencias', async () => {

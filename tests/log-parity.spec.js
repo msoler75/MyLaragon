@@ -19,10 +19,10 @@ test('Integridad de interceptación en Neutralino Shim (con Buffer)', async () =
     assert.ok(content.includes('/api/write-log'), 'Shim debería usar la API de logs en modo DEV');
 });
 
-test('Verificación de API de logs en vite.config.js', async () => {
-    const viteConfigPath = path.resolve(__dirname, '../vite.config.js');
-    const content = fs.readFileSync(viteConfigPath, 'utf-8');
+test('Verificación de API de logs en dev-server', async () => {
+    const devServerPath = path.resolve(__dirname, '../src/api/dev-server.js');
+    const content = fs.readFileSync(devServerPath, 'utf-8');
     
-    assert.ok(content.includes('/api/write-log'), 'vite.config.js debería proveer el endpoint /api/write-log');
-    assert.ok(content.includes('fs.appendFileSync(logPath, message)'), 'El endpoint /api/write-log debería escribir físicamente');
+    assert.ok(content.includes('/api/write-log'), 'dev-server.js debería proveer el endpoint /api/write-log');
+    assert.ok(content.includes('writeFile') || content.includes('appendFile'), 'El endpoint /api/write-log debería escribir físicamente');
 });

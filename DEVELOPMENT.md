@@ -136,3 +136,36 @@ En este proyecto, los tests no son solo una formalidad; son la garantía de que 
 ##  Pruebas y Calidad
 - **Vitest** es el framework de pruebas.
 - Se recomienda ejecutar 'RUN_SLOW=1 npm test' periódicamente para verificar la integración con binarios reales del sistema.
+
+---
+
+## Logros en Tests Concurrentes
+
+Durante el desarrollo, se identificó la necesidad de ejecutar el servidor de desarrollo y realizar pruebas o health checks de forma concurrente, sin que el servidor bloqueara la terminal.
+
+### Problema Inicial
+- El servidor de desarrollo (`src/api/dev-server.js`) ejecutado con `npm run dev` bloqueaba la terminal, impidiendo ejecutar comandos adicionales como health checks o tests en paralelo.
+- Esto dificultaba la automatización de pruebas y la verificación continua durante el desarrollo.
+
+### Soluciones Implementadas
+
+#### 1. Uso de "Concurrently" en Scripts NPM
+- Se agregó el paquete `concurrently` para ejecutar múltiples comandos en paralelo.
+- Se creó el script `dev-test` en `package.json` que utiliza `concurrently` con la opción `--success first --exit-code 0` para ejecutar el servidor y un health check simultáneamente.
+- Esto permite que el servidor se ejecute en background mientras se verifica su estado, terminando el proceso cuando el health check se completa exitosamente.
+
+#### 2. Configuración de VSCode Tasks.json
+- Se creó `.vscode/tasks.json` con tareas compuestas para una gestión más robusta de la concurrencia.
+- La tarea `dev-test` depende de las subtareas `server` (ejecuta `npm run dev` en background) y `health` (realiza una petición HTTP al endpoint `/health` después de un delay).
+- Esta configuración es más adecuada para Windows, ya que VSCode maneja mejor los procesos en background y la sincronización entre tareas.
+
+#### 3. Resolución de Problemas Específicos de Windows
+- **Comandos de Delay**: Se reemplazó `timeout` (no disponible en PowerShell puro) por `Start-Sleep -Seconds X` para pausas precisas.
+- **Escaping en PowerShell**: Se ajustó el escaping de comandos para evitar errores de sintaxis en scripts concurrentes.
+- **Gestión de Procesos**: Uso de `taskkill` y verificación con `netstat` para asegurar que los procesos se inicien y terminen correctamente.
+
+### Resultados Conseguidos
+- **Ejecución Concurrente**: El servidor ahora puede ejecutarse en background mientras se realizan health checks o tests, sin bloquear la terminal.
+- **Automatización Mejorada**: Los scripts npm y tareas VSCode permiten flujos de desarrollo más eficientes, con verificación automática del estado del servidor.
+- **Compatibilidad con Windows**: Las soluciones están optimizadas para el entorno Windows, resolviendo problemas comunes de ejecución de comandos en paralelo.
+- **Integración Continua**: Facilita la ejecución de pruebas de integración que requieren el servidor activo, mejorando la calidad y fiabilidad del desarrollo.

@@ -15,7 +15,18 @@ const pathDirname = (filePath) => {
 // Alias para compatibilidad
 const path = {
   join: pathJoin,
-  dirname: pathDirname
+  dirname: pathDirname,
+  relative: (from, to) => {
+    const fromParts = from.split('/').filter(p => p);
+    const toParts = to.split('/').filter(p => p);
+    let i = 0;
+    while (i < fromParts.length && i < toParts.length && fromParts[i] === toParts[i]) {
+      i++;
+    }
+    const up = fromParts.slice(i).map(() => '..').join('/');
+    const down = toParts.slice(i).join('/');
+    return up ? (up + '/' + down) : down;
+  }
 };
 
 const exeMap = {
@@ -74,7 +85,7 @@ export async function loadAppConfig(fsAdapter, appPath, log = () => {}) {
 }
 
 // Buscar ruta binaria de un servicio en un appPath concreto
-export async function getServiceBinPath(fsAdapter, appPath, type, version, log = () => {}) {
+export async function getServiceBinPath(fsAdapter, appPath, type, version, log = console.log) {
   if (!type || !version) return null;
 
   // Permitir instalaciones en appPath, usr/ y neutralino/ (portable)
@@ -93,7 +104,7 @@ export async function getServiceBinPath(fsAdapter, appPath, type, version, log =
     path.join(root, 'bin', typeOrAlias)
   ]));
 
-  const maxDepth = 3;
+  const maxDepth = 5;
 
   const findInDir = async (dir, depth) => {
     if (!(await fsAdapter.fileExists(dir))) return null;
@@ -103,7 +114,8 @@ export async function getServiceBinPath(fsAdapter, appPath, type, version, log =
     if (await fsAdapter.fileExists(binPath)) return path.join(dir, 'bin');
     if (depth >= maxDepth) return null;
     try {
-      const entries = await fsAdapter.readDir(dir);
+      const result = await fsAdapter.readDir(dir);
+      const entries = result.entries || result; // Adaptador devuelve { entries: [...] }
       for (const entry of entries) {
         const entryName = typeof entry === 'string' ? entry : entry.entry;
         const subPath = path.join(dir, entryName);
@@ -133,7 +145,7 @@ export async function getServiceBinPath(fsAdapter, appPath, type, version, log =
 }
 
 async function checkDirectoryHasExecutable(fsAdapter, dir, exeName, depth = 0) {
-  if (depth > 3) return false;
+  if (depth > 4) return false;
   if (!(await fsAdapter.fileExists(dir))) return false;
 
   const direct = path.join(dir, exeName);
@@ -142,7 +154,8 @@ async function checkDirectoryHasExecutable(fsAdapter, dir, exeName, depth = 0) {
   if (await fsAdapter.fileExists(binPath)) return true;
 
   try {
-    const entries = await fsAdapter.readDir(dir);
+    const result = await fsAdapter.readDir(dir);
+    const entries = result.entries || result; // Adaptador devuelve { entries: [...] }
     for (const entry of entries) {
       const entryName = typeof entry === 'string' ? entry : entry.entry;
       const subPath = path.join(dir, entryName);
@@ -157,6 +170,40 @@ async function checkDirectoryHasExecutable(fsAdapter, dir, exeName, depth = 0) {
     }
   } catch (e) {}
   return false;
+}
+
+async function scanForConfigs(fsAdapter, serviceId, basePath, subPath, patterns, options = {}) {
+  const fullBasePath = path.join(basePath, subPath);
+  const configs = [];
+
+  if (!(await fsAdapter.fileExists(fullBasePath))) return configs;
+
+  try {
+    const result = await fsAdapter.readDir(fullBasePath);
+    const files = result.entries || result;
+    for (const file of files) {
+      const fileName = typeof file === 'string' ? file : file.entry;
+      const matches = patterns.some(pattern => {
+        if (pattern.startsWith('*.')) {
+          return fileName.endsWith(pattern.slice(2));
+        }
+        return fileName.includes(pattern);
+      });
+      if (matches) {
+        const fullPath = path.join(fullBasePath, fileName);
+        const relativePath = path.relative(fullBasePath, fullPath);
+        configs.push({
+          label: `${serviceId}/${relativePath}`,
+          path: fullPath,
+          type: options.type
+        });
+      }
+    }
+  } catch (e) {
+    // Error reading directory
+  }
+
+  return configs;
 }
 
 export async function getAvailableVersions(fsAdapter, appPath, serviceType) {
@@ -299,13 +346,14 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
     }
 
     services.push({
+      id: 'apache',
       name: 'Apache',
       type: 'apache',
       version: apacheVersion,
       phpVersion: phpVersion,
       configs: filteredConfigs,
       availableVersions: availableApache,
-      availablePhpVersions: phpVersionsWithApacheModule,
+      availablePhpVersions: availablePhp,
       isInstalled: binPath !== null,
       requiresPhp: true,
       dependenciesReady: binPath !== null && !!phpBinPath,
@@ -316,6 +364,7 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
   if (phpVersion) {
     const binPath = await getServiceBinPath(fsAdapter, appPath, 'php', phpVersion, log);
     services.push({
+      id: 'php',
       name: 'PHP',
       type: 'php',
       version: phpVersion,
@@ -334,21 +383,22 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
     const binPath = await getServiceBinPath(fsAdapter, appPath, 'mysql', mysqlVersion, log);
     let mysqlBase = binPath && binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : (binPath || path.join(appPath, 'bin', 'mysql', mysqlVersion));
     const mysqlConfigs = [
-      { label: 'my.ini', path: path.join(mysqlBase, 'my.ini') },
-      { label: 'error.log', path: path.join(appPath, 'data', 'mysql', 'error.log') }
+      { label: 'my.ini', path: path.join(mysqlBase, 'my.ini') }
     ];
     if (await fsAdapter.fileExists(mysqlBase)) {
       try {
-        const entries = await fsAdapter.readDir(mysqlBase);
+        const result = await fsAdapter.readDir(mysqlBase);
+        const entries = result.entries || result;
         for (const entry of entries) {
           const fileName = typeof entry === 'string' ? entry : entry.entry;
-          if (fileName.endsWith('.log')) {
-            mysqlConfigs.push({ label: fileName, path: path.join(mysqlBase, fileName) });
+          if (fileName.endsWith('.log') || fileName.endsWith('.err')) {
+            mysqlConfigs.push({ label: fileName, path: path.join(mysqlBase, fileName), type: 'log' });
           }
         }
         const dataInBin = path.join(mysqlBase, 'data');
         if (await fsAdapter.fileExists(dataInBin)) {
-          const dataEntries = await fsAdapter.readDir(dataInBin);
+          const dataResult = await fsAdapter.readDir(dataInBin);
+          const dataEntries = dataResult.entries || dataResult;
           for (const entry of dataEntries) {
             const fileName = typeof entry === 'string' ? entry : entry.entry;
             if (fileName.endsWith('.log')) {
@@ -358,24 +408,8 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
         }
         const AppDataPath = path.join(appPath, 'data');
         if (await fsAdapter.fileExists(AppDataPath)) {
-          try {
-            const dataSubfolders = await fsAdapter.readDir(AppDataPath);
-            for (const entry of dataSubfolders) {
-              const subfolder = typeof entry === 'string' ? entry : entry.entry;
-              const subfolderPath = path.join(AppDataPath, subfolder);
-              try {
-                const subFiles = await fsAdapter.readDir(subfolderPath);
-                for (const subEntry of subFiles) {
-                  const fileName = typeof subEntry === 'string' ? subEntry : subEntry.entry;
-                  if (fileName.endsWith('.log')) {
-                    mysqlConfigs.push({ label: `${subfolder}/${fileName}`, path: path.join(subfolderPath, fileName) });
-                  }
-                }
-              } catch (e) {
-                // No es directorio o no se puede leer
-              }
-            }
-          } catch (e) {}
+          const dataConfigs = await scanForConfigs(fsAdapter, 'mysql', AppDataPath, 'mysql', ['*.log'], { type: 'log' });
+          mysqlConfigs.push(...dataConfigs);
         }
       } catch (e) {
         log(`[DEBUG] Error escaneando logs de MySQL: ${e.message}`);
@@ -383,6 +417,7 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
     }
 
     services.push({
+      id: 'mysql',
       name: 'MySQL',
       type: 'mysql',
       version: mysqlVersion,
@@ -414,6 +449,7 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
     }
 
     services.push({
+      id: 'nginx',
       name: 'Nginx',
       type: 'nginx',
       version: nginxVersion,
@@ -440,6 +476,7 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
     if (!version) continue;
     const binPath = await getServiceBinPath(fsAdapter, appPath, db.type, version, log);
     services.push({
+      id: db.type,
       name: db.name,
       type: db.type,
       version,

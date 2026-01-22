@@ -11,7 +11,7 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert';
 
-const API_BASE = 'http://localhost:5173/api';
+const API_BASE = 'http://localhost:5174';
 
 describe('API del Servidor Local (HTTP)', () => {
   
@@ -23,7 +23,7 @@ describe('API del Servidor Local (HTTP)', () => {
     let retries = 10;
     while (retries > 0) {
       try {
-        await fetch(`${API_BASE}/ping`);
+        await fetch(`${API_BASE}/health`);
         break;
       } catch {
         retries--;
@@ -36,7 +36,7 @@ describe('API del Servidor Local (HTTP)', () => {
   });
 
   test('GET /api/get-services debe devolver lista de servicios', async () => {
-    const response = await fetch(`${API_BASE}/get-services`);
+    const response = await fetch(`${API_BASE}/api/get-services`);
     assert.ok(response.ok, 'Request falló');
     
     const services = await response.json();
@@ -53,7 +53,7 @@ describe('API del Servidor Local (HTTP)', () => {
   test('POST /api/write-log debe escribir en app-debug.log', async () => {
     const testMessage = `[TEST-API] ${new Date().toISOString()} - Test de escritura de log`;
     
-    const response = await fetch(`${API_BASE}/write-log`, {
+    const response = await fetch(`${API_BASE}/api/write-log`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: testMessage })
@@ -73,7 +73,7 @@ describe('API del Servidor Local (HTTP)', () => {
   });
 
   test('POST /api/exec-command debe ejecutar comandos', async () => {
-    const response = await fetch(`${API_BASE}/exec-command`, {
+    const response = await fetch(`${API_BASE}/api/exec-command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: 'echo test' })

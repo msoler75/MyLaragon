@@ -59,10 +59,8 @@ export class FilesystemAdapter {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      // Normalizar formato: Vite devuelve array de strings, Neutralino devuelve array de objetos {entry}
-      return Array.isArray(data) 
-        ? data.map(item => typeof item === 'string' ? { entry: item } : item)
-        : data;
+      // dev-server devuelve { entries: [...] }, mantener ese formato
+      return data;
     }
     
     if (!this.neutralino?.filesystem) {
@@ -175,8 +173,8 @@ export class NodeFilesystemAdapter {
   async readDir(path) {
     await this.ready;
     const entries = this.fs.readdirSync(path);
-    // Devolver en formato compatible (strings)
-    return entries;
+    // Devolver en formato compatible con dev-server: { entries: [strings] }
+    return { entries };
   }
 
   async fileExists(path) {

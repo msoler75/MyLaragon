@@ -4,8 +4,11 @@
 WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servidores locales en Windows. Utiliza React + Tailwind CSS 4 en el frontend.
 
 ## Documentación técnica del proyecto
-
 - Consulta todos los archivos con extensión .md
+
+## Entorno de desarrollo
+- Windows 11
+- No uses comandos de linux: ls, grep, curl... Usa comandos de Powershell
 
 ## Arquitectura Crítica
 - **lib/ como Fuente Única**: `src/neutralino/lib/` contiene TODA la lógica de negocio (services-detector.js, fs-adapter.js).

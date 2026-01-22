@@ -2,9 +2,11 @@ import http from 'http';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { exec } from 'child_process';
+import { detectServices, loadAppConfig } from '../neutralino/lib/services-detector.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const basePath = path.resolve(__dirname, '../../neutralino');
+const basePath = path.resolve(__dirname, '../neutralino');
 
 console.log('[DEBUG] Starting server...');
 console.log('[DEBUG] basePath:', basePath);
@@ -79,6 +81,20 @@ const nodeAdapter = {
       console.error('[ADAPTER] writeFile error:', err);
       throw err;
     }
+  },
+
+  async execCommand(command) {
+    console.log('[ADAPTER] execCommand called:', command);
+    return new Promise((resolve) => {
+      exec(command, { cwd: basePath }, (error, stdout, stderr) => {
+        console.log('[ADAPTER] execCommand result:', { error: error?.message, stdout: stdout?.slice(0, 100), stderr: stderr?.slice(0, 100) });
+        resolve({
+          exitCode: error ? error.code || 1 : 0,
+          stdout: stdout || '',
+          stderr: stderr || ''
+        });
+      });
+    });
   }
 };
 
@@ -258,6 +274,91 @@ const server = http.createServer((req, res) => {
     return;
   }
   
+  // Exec command endpoint
+  if (req.url === '/api/exec-command' && req.method === 'POST') {
+    console.log('[REQUEST] Handling /api/exec-command');
+    let body = '';
+    
+    req.on('data', chunk => {
+      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
+      body += chunk.toString();
+    });
+    
+    req.on('end', async () => {
+      try {
+        console.log('[REQUEST] Body complete:', body);
+        const { command } = JSON.parse(body);
+        console.log('[REQUEST] Command:', command);
+        
+        const result = await nodeAdapter.execCommand(command);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        console.log('[REQUEST] /api/exec-command response sent');
+      } catch (err) {
+        console.error('[REQUEST] /api/exec-command error:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    
+    req.on('error', (err) => {
+      console.error('[REQUEST] Request error:', err);
+    });
+    
+    return;
+  }
+  
+  // Get services endpoint
+  if (req.url === '/api/get-services' && req.method === 'GET') {
+    console.log('[REQUEST] Handling /api/get-services');
+    
+    (async () => {
+      try {
+        const appConfig = await loadAppConfig(nodeAdapter, basePath);
+        const services = await detectServices({
+          fsAdapter: nodeAdapter,
+          appPath: basePath,
+          userConfig: {},
+          appConfig,
+          log: console.log
+        });
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(services));
+        console.log('[REQUEST] /api/get-services response sent');
+      } catch (err) {
+        console.error('[REQUEST] /api/get-services error:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    })();
+    
+    return;
+  }
+  
+  // Serve services.json
+  if (req.url === '/services.json' && req.method === 'GET') {
+    console.log('[REQUEST] Handling /services.json');
+    
+    (async () => {
+      try {
+        const servicesPath = path.join(basePath, 'services.json');
+        const content = await nodeAdapter.readFile(servicesPath);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(content);
+        console.log('[REQUEST] /services.json response sent');
+      } catch (err) {
+        console.error('[REQUEST] /services.json error:', err);
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not found' }));
+      }
+    })();
+    
+    return;
+  }
+  
   // 404
   console.log('[REQUEST] 404 Not Found');
   res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -280,6 +381,6 @@ server.on('connection', (socket) => {
 const PORT = 5174;
 server.listen(PORT, () => {
   console.log(`[SERVER] 🚀 Debug API Server running on http://localhost:${PORT}`);
-  console.log('[SERVER] Endpoints: /health, /api/read-dir, /api/file-exists, /api/read-file, /api/write-log');
+  console.log('[SERVER] Endpoints: /health, /api/read-dir, /api/file-exists, /api/read-file, /api/write-log, /api/exec-command, /api/get-services, /services.json');
   console.log('[SERVER] Ready to accept requests');
 });
