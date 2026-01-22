@@ -11,15 +11,15 @@ function SettingsView({ config, setConfig, t, availableLanguages }) {
   const hasChanges = JSON.stringify(localConfig) !== JSON.stringify(config);
 
   const handleSave = async () => {
-    if (window.electronAPI) {
-      await window.electronAPI.setConfig(localConfig);
-      const updatedConfig = await window.electronAPI.getConfig();
+    if (window.webservAPI) {
+      await window.webservAPI.setConfig(localConfig);
+      const updatedConfig = await window.webservAPI.getConfig();
       setConfig(updatedConfig);
     }
   };
 
   const handleSelectDir = async (key) => {
-    const path = await window.electronAPI.selectDirectory();
+    const path = await window.webservAPI.selectDirectory();
     if (path) {
       setLocalConfig({ ...localConfig, [key]: path });
     }

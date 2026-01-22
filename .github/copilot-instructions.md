@@ -3,9 +3,18 @@
 ## Perfil del Proyecto
 WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servidores locales en Windows. Utiliza React + Tailwind CSS 4 en el frontend.
 
+## Documentación técnica del proyecto
+
+- Consulta todos los archivos con extensión .md
+
 ## Arquitectura Crítica
-- **El Shim (`src/neutralino/neutralino-shim.js`)**: Es la pieza central. Unifica las APIs de Neutralino y Electron. El frontend llama a `window.electronAPI`, que el shim implementa inyectando lógica sobre Neutralino o redirigiendo a Electron.
-- **Modo Proxy (Desarrollo)**: En modo `npm run dev` (Vite), el Shim detecta la ausencia de `NL_TOKEN` y redirige las llamadas de OS/Filesystem a endpoints `/api/...` definidos en `vite.config.js`.
+- **lib/ como Fuente Única**: `src/neutralino/lib/` contiene TODA la lógica de negocio (services-detector.js, fs-adapter.js).
+- **El Shim (`src/neutralino/neutralino-shim.js`)**: Unifica APIs. Importa funciones de lib/ y las expone como `window.electronAPI`.
+- **Modo DEV (Doble Servidor)**:
+  1. **API Server (puerto 5174)**: `src/api/dev-server.js` - Express que expone funciones REALES de lib/ vía HTTP.
+  2. **Vite Server (puerto 5173)**: Sirve frontend y hace PROXY `/api/*` → `localhost:5174`.
+- **Modo PROD**: Neutralino runtime con APIs nativas (filesystem, os.execCommand).
+- **fs-adapter.js**: Detecta modo (dev/prod) y usa fetch() o Neutralino.filesystem según corresponda.
 
 ## Reglas de Oro (No Ignorar)
 0. **DRY extremo**
@@ -47,18 +56,22 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
 7- **Nunca supongas**
    - Nunca digas 'Esto debería funcionar' o 'Esto ya debería estar bien'. Compruébalo. Para eso usa las herramientas de logging y testing.
    - Si algo no está claro, investiga o pregunta. No des nada por sentado.
+   - Puedes investigar en app-debug.log para ver los mensajes de log generados en ejecuciones y así comprobar estado de la aplicación y sus funcionalidades.
 
 8- **Nunca molestes ni delegues**
    - Evita en lo posible molestar al usuario si tú puedes arreglártelas solo.
    - Nunca pidas al usuario que ejecute un comando o compruebe algo ¡si tú lo puedes hacer! 
+   - Recuerda consultar los logs para verificar estado de la app.
    - Solo pide ayuda al usuario cuando no quede otro remedio.
 
 
 ## Workflows Comunes
 - **Fix Duplication**: Ejecutar `node scripts/sync-resources.js`.
-- **Detección de Servicios**: Revisar `electron/services-detector.js` para lógica de puertos y `src/neutralino/neutralino-shim.js` para ejecución de comandos.
-- **Debugging Proactivo**: Si una prueba o comando falla, lee las últimas 50 líneas de `app-debug.log` antes de proponer cambios.
-- **Testing**: Usa `vitest` para lógica pura y `npm run test` para integración (activa `RUN_SLOW=1` para testear con binarios reales).
+- **Lógica de Negocio**: Toda en `src/neutralino/lib/services-detector.js` (browser-compatible, sin módulos Node.js).
+- **Servidor API DEV**: `src/api/dev-server.js` importa funciones de lib/ y las expone vía HTTP - NO duplica lógica.
+- **vite.config.js**: SOLO proxy y plugins de build - PROHIBIDO implementar lógica de API aquí.
+- **Debugging Proactivo**: Lee `app-debug.log` (últimas 50 líneas) antes de proponer cambios.
+- **Testing**: `npm test` para fast, `RUN_SLOW=1 npm test` para tests con binarios reales.
 
 ## Convenciones de Código
 - **Frontend**: Componentes funcionales, Lucide para iconos, Tailwind 4 (usar variables CSS definidas en `themes/*.json`).

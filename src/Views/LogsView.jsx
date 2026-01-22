@@ -12,8 +12,8 @@ function LogsView({ logs, t, setLogs }) {
   }, [logs, activeFilters]);
 
   const handleClear = async () => {
-    if (window.electronAPI) {
-      const success = await window.electronAPI.clearLogs();
+    if (window.webservAPI) {
+      const success = await window.webservAPI.clearLogs();
       if (success) setLogs([]);
     }
   };

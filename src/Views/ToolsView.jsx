@@ -10,7 +10,7 @@ function ToolsView({ t }) {
       icon: Terminal,
       color: 'bg-[#1e1e1e] border border-white/10',
       iconColor: 'text-app-success',
-      onClick: () => window.electronAPI.openTerminal()
+      onClick: () => window.webservAPI.openTerminal()
     },
     {
       id: 'hosts',
@@ -19,7 +19,7 @@ function ToolsView({ t }) {
       icon: FileText,
       color: 'bg-app-primary',
       iconColor: 'text-white',
-      onClick: () => window.electronAPI.openHosts()
+      onClick: () => window.webservAPI.openHosts()
     },
     {
       id: 'env',
@@ -28,7 +28,7 @@ function ToolsView({ t }) {
       icon: Cpu,
       color: 'bg-app-success',
       iconColor: 'text-white',
-      onClick: () => window.electronAPI.openEnvVars()
+      onClick: () => window.webservAPI.openEnvVars()
     },
     {
       id: 'inspect_resources',
@@ -38,8 +38,8 @@ function ToolsView({ t }) {
       color: 'bg-app-warning',
       iconColor: 'text-white',
       onClick: () => {
-        if (window.electronAPI) {
-          window.electronAPI.openDevTools();
+        if (window.webservAPI) {
+          window.webservAPI.openDevTools();
         }
       }
     }
@@ -73,7 +73,7 @@ function ToolsView({ t }) {
           <h3 className="text-app-primary text-sm font-black mb-1 uppercase tracking-tight">{t.needMore}</h3>
           <p className="text-[10px] font-bold text-app-text-muted mb-4 uppercase tracking-widest">{t.workingMore}</p>
           <button 
-            onClick={() => window.electronAPI.openInBrowser('https://github.com/msoler75/WebServDev/issues')}
+            onClick={() => window.webservAPI.openInBrowser('https://github.com/msoler75/WebServDev/issues')}
             className="bg-app-primary text-app-primary-text px-6 py-2 rounded-xl font-black text-[10px] hover:scale-110 transform transition-all uppercase tracking-[0.2em] shadow-lg shadow-app-primary/20"
           >
             {t.suggestFunc} 

@@ -37,6 +37,17 @@ const syncConfig = [
     source: "src/neutralino/bootstrap.html",
     target: "neutralino/www/bootstrap.html",
     header: "<!--  NO EDITAR ESTE ARCHIVO DIRECTAMENTE - EDITAR src/neutralino/bootstrap.html -->\n"
+  },
+  // Copiar lib/ completa
+  {
+    source: "src/neutralino/lib/fs-adapter.js",
+    target: "neutralino/www/lib/fs-adapter.js",
+    header: "//  NO EDITAR ESTE ARCHIVO DIRECTAMENTE\n// Editable en: src/neutralino/lib/fs-adapter.js\n\n"
+  },
+  {
+    source: "src/neutralino/lib/services-detector.js",
+    target: "neutralino/www/lib/services-detector.js",
+    header: "//  NO EDITAR ESTE ARCHIVO DIRECTAMENTE\n// Editable en: src/neutralino/lib/services-detector.js\n\n"
   }
 ];
 

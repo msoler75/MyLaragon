@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getAvailableVersions, getServiceBinPath, detectServices, loadAppConfig } from '../electron/services-detector.js';
+import { getAvailableVersions, getServiceBinPath, detectServices, loadAppConfig } from '../src/neutralino/lib/services-detector.js';
+import { createNodeFilesystemAdapter } from '../src/neutralino/lib/fs-adapter.js';
 
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
@@ -11,9 +12,11 @@ function ensureDir(p) {
 
 describe('Integridad del motor de detección REAL', () => {
   let tmpDir;
+  let fsAdapter;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webservdev-debug-'));
+    fsAdapter = createNodeFilesystemAdapter();
   });
 
   afterEach(() => {
@@ -30,10 +33,10 @@ describe('Integridad del motor de detección REAL', () => {
     fs.writeFileSync(path.join(nestedDir, 'php.exe'), 'dummy');
     
     // El motor real debe encontrarlo
-    const versions = getAvailableVersions(tmpDir, 'php');
+    const versions = await getAvailableVersions(fsAdapter, tmpDir, 'php');
     assert.ok(versions.includes('8.2.12'), 'El motor real no detectó la carpeta de versión');
 
-    const binPath = getServiceBinPath(tmpDir, 'php', '8.2.12');
+    const binPath = await getServiceBinPath(fsAdapter, tmpDir, 'php', '8.2.12');
     assert.ok(binPath, 'El motor real no encontró el binario en la estructura anidada');
     assert.ok(binPath.includes('php-8.2.12-Win32-vs16-x64'), 'La ruta del binario no es correcta');
   });
@@ -46,10 +49,10 @@ describe('Integridad del motor de detección REAL', () => {
     ensureDir(path.join(apacheRoot, 'Apache24', 'conf'));
     fs.writeFileSync(path.join(apacheRoot, 'Apache24', 'conf', 'httpd.conf'), '# config');
 
-    const versions = getAvailableVersions(tmpDir, 'apache');
+    const versions = await getAvailableVersions(fsAdapter, tmpDir, 'apache');
     assert.ok(versions.includes('2.4.58'));
 
-    const binPath = getServiceBinPath(tmpDir, 'apache', '2.4.58');
+    const binPath = await getServiceBinPath(fsAdapter, tmpDir, 'apache', '2.4.58');
     assert.ok(binPath && binPath.includes('Apache24\\bin'), 'No detectó la subcarpeta /bin de Apache');
   });
 
@@ -71,8 +74,9 @@ describe('Integridad del motor de detección REAL', () => {
     // app.ini
     fs.writeFileSync(path.join(tmpDir, 'app.ini'), '[apache]\nversion=2.4.58\n[php]\nversion=8.2.12');
 
-    const appConfig = loadAppConfig(tmpDir, () => {});
-    const services = detectServices({
+    const appConfig = await loadAppConfig(fsAdapter, tmpDir, () => {});
+    const services = await detectServices({
+      fsAdapter,
       appPath: tmpDir,
       userConfig: { projectsPath: path.join(tmpDir, 'www') },
       appConfig,

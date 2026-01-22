@@ -14,9 +14,9 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
       
       setHasFetched(true);
       setLoadingRepo(true);
-      if (window.electronAPI && typeof window.electronAPI.getRemoteServices === 'function') {
+      if (window.webservAPI && typeof window.webservAPI.getRemoteServices === 'function') {
         try {
-          const data = await window.electronAPI.getRemoteServices();
+          const data = await window.webservAPI.getRemoteServices();
           setRemoteServices(data.services || []);
         } catch (e) {
           console.error("Error fetching remote services:", e);
@@ -33,7 +33,7 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
 
     setActiveTasks(prev => ({ ...prev, [taskId]: 'installing' }));
     try {
-      const result = await window.electronAPI.installService({
+      const result = await window.webservAPI.installService({
         url: versionInfo.url,
         serviceId: service.id,
         version: versionInfo.version,
@@ -72,7 +72,7 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
     
     setActiveTasks(prev => ({ ...prev, [taskId]: 'uninstalling' }));
     try {
-      const result = await window.electronAPI.uninstallService({
+      const result = await window.webservAPI.uninstallService({
         serviceId: service.id,
         version: versionInfo.version,
         installPath: service.installPath
@@ -99,10 +99,10 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
 
   const handleCancelTask = async (service, versionInfo) => {
     const taskId = `${service.id}-${versionInfo.version}`;
-    if (window.electronAPI && window.electronAPI.cancelTask) {
+    if (window.webservAPI && window.webservAPI.cancelTask) {
       // Marcamos como cancelando inmediatamente en la UI
       setActiveTasks(prev => ({ ...prev, [taskId]: 'cancelling' }));
-      await window.electronAPI.cancelTask(taskId);
+      await window.webservAPI.cancelTask(taskId);
       // No eliminamos del estado aquí, dejamos que el finally de la tarea original lo haga
     }
   };

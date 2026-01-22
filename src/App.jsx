@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { 
   Activity, 
   Settings as SettingsIcon, 
@@ -17,7 +17,7 @@ import ToolsView from './Views/ToolsView'
 import LogsView from './Views/LogsView'
 import SettingsView from './Views/SettingsView'
 
-// Detección automática de archivos de idioma
+// Detecci�n autom�tica de archivos de idioma
 const languageFiles = import.meta.glob('./i18n/*.json', { eager: true });
 const translations = {};
 const availableLanguages = [];
@@ -32,7 +32,7 @@ Object.entries(languageFiles).forEach(([path, content]) => {
   });
 });
 
-// Detección automática de temas
+// Detecci�n autom�tica de temas
 const themeFiles = import.meta.glob('./themes/*.json', { eager: true });
 const themes = {};
 Object.entries(themeFiles).forEach(([path, content]) => {
@@ -71,22 +71,22 @@ function App() {
   const refreshingRef = useRef(false);
   const lastServicesRef = useRef();
   const loadServices = useCallback(async (isSilent = false, hiddenServicesOverride = null) => {
-    // Si viene de un evento de React o similar, isSilent no será estrictamente true
+    // Si viene de un evento de React o similar, isSilent no ser� estrictamente true
     const silent = isSilent === true;
     // Usar hiddenServicesOverride si se proporciona, sino usar el estado actual
     const hiddenToUse = hiddenServicesOverride !== null ? hiddenServicesOverride : hiddenServices;
     
-    console.log('[APP] loadServices called, electronAPI:', !!window.electronAPI, 'isSilent:', isSilent);
-    if (window.electronAPI && !refreshingRef.current) {
+    console.log('[APP] loadServices called, webservAPI:', !!window.webservAPI, 'isSilent:', isSilent);
+    if (window.webservAPI && !refreshingRef.current) {
       refreshingRef.current = true;
       if (!silent) setLoading(true)
       try {
         console.log('[APP] Llamando a getServices con hidden:', hiddenToUse);
-        const servicesData = await window.electronAPI.getServices(hiddenToUse)
+        const servicesData = await window.webservAPI.getServices(hiddenToUse)
         console.log('[APP] Servicios recibidos (DATA):', JSON.stringify(servicesData));
         
         if (!servicesData || !Array.isArray(servicesData)) {
-          console.error('[APP] getServices no devolvió un array válido:', servicesData);
+          console.error('[APP] getServices no devolvi� un array v�lido:', servicesData);
         } else {
           if (JSON.stringify(servicesData) !== JSON.stringify(lastServicesRef.current)) {
             setServices(servicesData)
@@ -103,7 +103,7 @@ function App() {
         refreshingRef.current = false;
       }
     } else {
-      console.log('[APP] loadServices saltado. electronAPI:', !!window.electronAPI, 'refrescando:', refreshingRef.current);
+      console.log('[APP] loadServices saltado. webservAPI:', !!window.webservAPI, 'refrescando:', refreshingRef.current);
     }
   }, [hiddenServices]);
 
@@ -136,8 +136,8 @@ function App() {
 
   useEffect(() => {
     const loadConfig = async () => {
-      if (window.electronAPI) {
-        const data = await window.electronAPI.getConfig()
+      if (window.webservAPI) {
+        const data = await window.webservAPI.getConfig()
         setConfig(data)
         setIsMonitoring(data.monitoringAuto ?? true)
       }
@@ -159,8 +159,8 @@ function App() {
       }
     };
     
-    if (window.electronAPI && window.electronAPI.onLog) {
-      // Función para formatear la fecha consistentemente
+    if (window.webservAPI && window.webservAPI.onLog) {
+      // Funci�n para formatear la fecha consistentemente
       const formatTime = (ts) => {
         try {
           return new Date(ts).toLocaleTimeString();
@@ -169,19 +169,19 @@ function App() {
         }
       };
 
-      // Cargar logs históricos primero
-      window.electronAPI.getLogs().then(historicalLogs => {
+      // Cargar logs hist�ricos primero
+      window.webservAPI.getLogs().then(historicalLogs => {
         if (!isMounted) return;
         setLogs(prev => {
-          // Si ya hay logs (en vivo), los añadimos después de los históricos sin duplicar
+          // Si ya hay logs (en vivo), los a�adimos despu�s de los hist�ricos sin duplicar
           const history = historicalLogs.map(l => ({...l, timestamp: formatTime(l.timestamp)}));
-          // Evitamos duplicar logs que ya podrían haber llegado "en vivo" comparando mensaje y timestamp aproximado
+          // Evitamos duplicar logs que ya podr�an haber llegado "en vivo" comparando mensaje y timestamp aproximado
           return [...history, ...prev].slice(-300);
         });
       });
 
       // Suscribirse a logs en vivo
-      window.electronAPI.onLog((logData) => {
+      window.webservAPI.onLog((logData) => {
         if (!isMounted) return;
         
         if (logData.level === 'ERROR' && activeTab !== 'logs') {
@@ -194,7 +194,7 @@ function App() {
         };
         logBuffer.push(formattedLog);
         
-        // Flush en el próximo tick si es el primer log en el buffer
+        // Flush en el pr�ximo tick si es el primer log en el buffer
         if (logBuffer.length === 1) {
           setTimeout(flushLogs, 0);
         }
@@ -203,7 +203,7 @@ function App() {
 
     return () => {
       isMounted = false;
-      // Idealmente aquí removeríamos el listener, pero onLog en preload.js no devuelve el remover aún
+      // Idealmente aqu� remover�amos el listener, pero onLog en preload.js no devuelve el remover a�n
     };
   }, [activeTab]);
 
@@ -229,12 +229,12 @@ function App() {
     loadServices(false);
   }, []); // Solo al montar
 
-  // Sistema de actualización inteligente: pausa durante acciones para evitar parpadeos y race conditions
+  // Sistema de actualizaci�n inteligente: pausa durante acciones para evitar parpadeos y race conditions
   useEffect(() => {
-    // Si hay procesos en curso (start/stop) o el shim indica que está instalando, pausamos el polling
+    // Si hay procesos en curso (start/stop) o el shim indica que est� instalando, pausamos el polling
     if (isMonitoring && processingServices.length === 0) {
       const interval = setInterval(() => {
-        // Doble comprobación: si el shim está ocupado instalando, saltamos este tick
+        // Doble comprobaci�n: si el shim est� ocupado instalando, saltamos este tick
         if (window.__is_installing) return;
         loadServices(true);
       }, 7000)
@@ -261,11 +261,11 @@ function App() {
   };
 
   const handleStartService = async (serviceName) => {
-    if (window.electronAPI && !processingServices.includes(serviceName)) {
+    if (window.webservAPI && !processingServices.includes(serviceName)) {
       try {
         setProcessingServices(prev => [...prev, serviceName])
         
-        // Identificar tipo para el delay de estabilización
+        // Identificar tipo para el delay de estabilizaci�n
         const service = services.find(s => s.name === serviceName);
 
         // Dependencias faltantes (p.ej. Apache requiere PHP)
@@ -275,7 +275,7 @@ function App() {
           return;
         }
 
-        // Si el servicio no está instalado, redirigir a la vista de instalación
+        // Si el servicio no est� instalado, redirigir a la vista de instalaci�n
         if (service && service.isInstalled === false) {
           window.dispatchEvent(new CustomEvent('change-tab', { detail: 'install' }));
           setProcessingServices(prev => prev.filter(s => s !== serviceName));
@@ -285,14 +285,14 @@ function App() {
         const type = service?.type?.toLowerCase() || '';
         const isHeavy = ['mysql', 'mariadb', 'mongodb', 'postgresql'].includes(type);
         
-        // Verificar si el servicio ya está corriendo
+        // Verificar si el servicio ya est� corriendo
         if (service?.status === 'running') {
-          console.log(`${serviceName} ya está ejecutándose`);
+          console.log(`${serviceName} ya est� ejecut�ndose`);
           setProcessingServices(prev => prev.filter(s => s !== serviceName));
           return;
         }
         
-        const result = await window.electronAPI.startService(serviceName);
+        const result = await window.webservAPI.startService(serviceName);
         
         if (!result.success) {
           console.error('Error starting service:', result.message);
@@ -301,7 +301,7 @@ function App() {
           return;
         }
         
-        // Espera dinámica: DBs necesitan más tiempo para abrir puertos
+        // Espera din�mica: DBs necesitan m�s tiempo para abrir puertos
         const delay = isHeavy ? 4500 : (['apache', 'nginx'].includes(type) ? 2500 : 1500);
         await new Promise(resolve => setTimeout(resolve, delay));
         
@@ -317,7 +317,7 @@ function App() {
   }
 
   const handleStopService = async (serviceName) => {
-    if (window.electronAPI && !processingServices.includes(serviceName)) {
+    if (window.webservAPI && !processingServices.includes(serviceName)) {
       try {
         setProcessingServices(prev => [...prev, serviceName])
         
@@ -325,9 +325,9 @@ function App() {
         const type = service?.type?.toLowerCase() || '';
         const isHeavy = ['mysql', 'mariadb', 'mongodb', 'postgresql'].includes(type);
         
-        await window.electronAPI.stopService(serviceName)
+        await window.webservAPI.stopService(serviceName)
         
-        // El stop suele ser más rápido pero las DBs limpian locks
+        // El stop suele ser m�s r�pido pero las DBs limpian locks
         const delay = isHeavy ? 2000 : 1200;
         await new Promise(resolve => setTimeout(resolve, delay));
         
@@ -348,7 +348,7 @@ function App() {
       ? hiddenServices.filter(s => s !== serviceName) 
       : [...hiddenServices, serviceName];
     setHiddenServices(newHidden);
-    // Pasar explícitamente los servicios ocultos actualizados a loadServices
+    // Pasar expl�citamente los servicios ocultos actualizados a loadServices
     loadServices(false, newHidden);
   }
 
@@ -421,8 +421,8 @@ function App() {
                 const next = !isMonitoring;
                 setIsMonitoring(next);
                 setConfig(prev => ({ ...prev, monitoringAuto: next }));
-                if (window.electronAPI) {
-                  await window.electronAPI.setConfig({ ...config, monitoringAuto: next });
+                if (window.webservAPI) {
+                  await window.webservAPI.setConfig({ ...config, monitoringAuto: next });
                 }
               }}
               className={`flex items-center space-x-2 px-3 py-2 rounded-xl border text-[10px] font-black shadow-sm transition-all uppercase tracking-wider ${
@@ -476,9 +476,9 @@ function App() {
                 onStop={handleStopService}
                 loadServices={loadServices}
                 onStartAll={async () => {
-                  if (window.electronAPI) {
+                  if (window.webservAPI) {
                     setIsBulkRunning(true)
-                    const current = await window.electronAPI.getServices(hiddenServices)
+                    const current = await window.webservAPI.getServices(hiddenServices)
                     setServices(current)
                     const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status !== 'running' && !s.isLibrary)
                     await Promise.all(visible.map(s => handleStartService(s.name)))
@@ -486,9 +486,9 @@ function App() {
                   }
                 }}
                 onStopAll={async () => {
-                  if (window.electronAPI) {
+                  if (window.webservAPI) {
                     setIsBulkRunning(true)
-                    const current = await window.electronAPI.getServices(hiddenServices)
+                    const current = await window.webservAPI.getServices(hiddenServices)
                     setServices(current)
                     const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status === 'running' && !s.isLibrary)
                     await Promise.all(visible.map(s => handleStopService(s.name)))

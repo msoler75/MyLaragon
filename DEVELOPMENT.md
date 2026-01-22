@@ -2,14 +2,16 @@
 
 ##  Arquitectura del Sistema
 
-La plataforma **WebServDev** utiliza un modelo híbrido que permite ejecutarse sobre **Electron** o **Neutralino**, compartiendo la misma base de código React para la interfaz. El sistema es 100% independiente y gestiona sus propios binarios y carpetas (`/bin`, `/www`, `/etc`, etc.) de forma autónoma.
+La plataforma **WebServDev** utiliza **Neutralino** como runtime ligero, compartiendo código React para la interfaz. El sistema es 100% independiente y gestiona sus propios binarios y carpetas (`/bin`, `/www`, `/etc`, etc.) de forma autónoma.
 
 ### Componentes Principales
 - **Frontend**: React + Vite + Tailwind CSS 4.
-- **Backend (Runtime)**: 
-  - **Electron**: Proceso principal ([electron/main.js](electron/main.js)) and bridge ([electron/preload.js](electron/preload.js)).
+- **Runtime**: 
   - **Neutralino**: Configuración ([neutralino/neutralino.config.json](neutralino/neutralino.config.json)) y shim de compatibilidad ([src/neutralino/neutralino-shim.js](src/neutralino/neutralino-shim.js)).
-- **Servicios**: Detección y control de binarios de forma independiente ([electron/services-detector.js](electron/services-detector.js)).
+- **Lógica de Negocio**: Todo centralizado en [src/neutralino/lib/](src/neutralino/lib/) - FUENTE ÚNICA DE VERDAD.
+  - [services-detector.js](src/neutralino/lib/services-detector.js): Detección y gestión de servicios (browser-compatible).
+  - [fs-adapter.js](src/neutralino/lib/fs-adapter.js): Abstracción de filesystem (dev vs prod).
+- **Servidor API (DEV)**: [src/api/dev-server.js](src/api/dev-server.js) expone las funciones REALES de lib/ vía HTTP (Express en puerto 5174).
 
 ### Política de "Fuente Única de Verdad" (CRÍTICO)
 **ESTÁ TERMINANTEMENTE PROHIBIDO** editar archivos generados. El sistema utiliza una estructura centralizada en `src/neutralino/`.
@@ -68,7 +70,18 @@ WebServDev implementa un mecanismo de logging persistente y en tiempo real con t
 
 ### Modo Desarrollo vs. Producción
 *   **Producción**: Utiliza binarios nativos y las APIs directas de Neutralino (`filesystem`, `os.execCommand`).
-*   **Desarrollo (Vite)**: Dado que el navegador no tiene acceso al sistema de archivos, el Shim detecta la ausencia de `NL_TOKEN` y redirige las llamadas (como ejecución de comandos o chequeo de archivos) a un **Proxy API** integrado en `vite.config.js`. Esto emula el comportamiento nativo usando Node.js en el backend.
+*   **Desarrollo (Vite)**: Se ejecutan DOS servidores en paralelo:
+    1. **API Server (puerto 5174)**: [src/api/dev-server.js](src/api/dev-server.js) - Servidor Express que importa y expone las funciones REALES de [lib/](src/neutralino/lib/). NO duplica lógica, solo transporta.
+    2. **Vite Server (puerto 5173)**: Sirve el frontend React y hace PROXY de todas las llamadas `/api/*` hacia `localhost:5174`.
+    
+    El [fs-adapter.js](src/neutralino/lib/fs-adapter.js) detecta el modo dev y usa `fetch('/api/...')` en lugar de APIs nativas.
+
+### Principio DRY (Don't Repeat Yourself)
+**PROHIBICIÓN ABSOLUTA** de duplicar lógica de negocio:
+- [src/neutralino/lib/](src/neutralino/lib/) contiene TODA la lógica (detección, filesystem, configuración).
+- [src/api/dev-server.js](src/api/dev-server.js) solo transporta estas funciones vía HTTP.
+- [vite.config.js](vite.config.js) SOLO hace proxy - NO implementa lógica de API.
+- Cualquier "simulación" o reimplementación de servicios está PROHIBIDA.
 
 ---
 
@@ -83,12 +96,13 @@ Una versión de un servicio (ej. PHP 8.1) **NO** se considera instalada simpleme
 3.  **Filtrado de "Fantasmas"**: Si una carpeta existe pero no contiene el binario válido, el sistema la excluirá automáticamente de la lista de versiones disponibles para evitar fallos de ejecución. 
     *   *Nota*: Si ves una versión en la carpeta `dist` pero no en tu entorno de desarrollo, asegúrate de que el archivo `.exe` se ha copiado correctamente y no ha sido bloqueado por el antivirus o Git.
 
-### Sincronización Main vs. Shim
-Dado que la app es híbrida, la lógica de detección debe ser idéntica en dos lugares:
--   **Electron (Node.js)**: Implementado en [electron/services-detector.js](electron/services-detector.js). Usa el módulo `fs` nativo.
--   **Neutralino/Dev (Shim)**: Implementado en [src/neutralino/neutralino-shim.js](src/neutralino/neutralino-shim.js). Usa la API de `Neutralino.filesystem` o el proxy `/api/read-dir` en modo desarrollo.
+### Detección de Servicios (Browser-Compatible)
+La detección de servicios se implementa en [src/neutralino/lib/services-detector.js](src/neutralino/lib/services-detector.js) usando SOLO funciones browser-compatible (sin `require('path')` ni módulos Node.js):
+-   **Producción (Neutralino)**: El shim [src/neutralino/neutralino-shim.js](src/neutralino/neutralino-shim.js) importa `detectServices` de lib/ y lo ejecuta con `fsAdapter` (Neutralino APIs).
+-   **Desarrollo (Browser)**: El mismo código se ejecuta usando `fsAdapter` que hace `fetch()` a `/api/*` (proxy a dev-server.js).
+-   **Tests**: Los tests importan las funciones reales de lib/ y las ejecutan con un adapter Node.js.
 
-**Cualquier cambio en el algoritmo de búsqueda o en las rutas de detección debe replicarse en ambos archivos para evitar que la app se comporte de forma inconsistente entre runtimes.**
+**NO hay duplicación**: Una sola implementación en lib/, diferentes adapters según el entorno (browser vs Node.js).
 
 ### Resolución de Rutas (BasePath)
 El sistema resuelve las rutas relativas a un `basePath` dinámico:
@@ -114,7 +128,7 @@ En este proyecto, los tests no son solo una formalidad; son la garantía de que 
 
 ### Estándares de Tests
 -   **Uso de Carpetas Temporales**: Usa `os.tmpdir()` para crear entornos de prueba aislados.
--   **Importaciones Reales**: Usa `import { detectServices } from '../electron/services-detector.js'` para asegurar que testeas el código productivo.
+-   **Importaciones Reales**: Usa `import { detectServices } from '../src/lib/services-detector.js'` para asegurar que testeas el código productivo.
 -   **Validación de Salida Real**: Verifica el archivo de log real, la existencia de procesos reales o los códigos de salida de comandos reales.
 -   **Slow Tests**: Los tests que descargan binarios reales o ejecutan comandos pesados deben estar marcados o activarse solo con `RUN_SLOW=1`.
 

@@ -8,14 +8,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_FILE = path.resolve(__dirname, '../app-debug.log');
 
-test('Integridad de interceptación en Electron main.js', async () => {
-    const mainJsPath = path.resolve(__dirname, '../electron/main.js');
-    const content = fs.readFileSync(mainJsPath, 'utf-8');
-    
-    assert.ok(content.includes('console.log ='), 'Electron debería interceptar console.log');
-    assert.ok(content.includes('fs.appendFileSync(logPath'), 'Electron debería escribir en el archivo de log');
-});
-
 test('Integridad de interceptación en Neutralino Shim (con Buffer)', async () => {
     // La fuente de verdad ahora está en src/neutralino/
     const shimPath = path.resolve(__dirname, '../src/neutralino/neutralino-shim.js');

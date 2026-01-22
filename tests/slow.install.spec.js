@@ -6,8 +6,9 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { execFileSync } from 'node:child_process';
-import { installFromZip } from '../electron/service-installer.js';
-import { detectServices, loadAppConfig } from '../electron/services-detector.js';
+import { installFromZip } from '../src/neutralino/lib/service-installer.js';
+import { detectServices, loadAppConfig } from '../src/neutralino/lib/services-detector.js';
+import { createNodeFilesystemAdapter } from '../src/neutralino/lib/fs-adapter.js';
 
 const runSlow = process.env.RUN_SLOW === '1';
 const slowDescribe = runSlow ? describe : describe.skip;
@@ -98,15 +99,16 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=2.4.0`);
 
       // Detectar instalación
-      const appConfig = loadAppConfig(tmpDir, noop);
-      let services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const fsAdapter = createNodeFilesystemAdapter();
+      const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+      let services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const apache = services.find(s => s.type === 'apache');
       assert.ok(apache, 'apache no detectado tras instalar');
       assert.equal(apache.isInstalled, true, 'apache no marcado como instalado');
 
       // "Desinstalar": borrar la carpeta y re-chequear
       fs.rmSync(destDir, { recursive: true, force: true });
-      services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(tmpDir, noop), log: noop });
+      services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(fsAdapter, tmpDir, noop), log: noop });
       const apacheAfter = services.find(s => s.type === 'apache');
       assert.ok(apacheAfter);
       assert.equal(apacheAfter.isInstalled, false, 'apache debería estar no instalado tras borrar carpeta');
@@ -131,8 +133,9 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[php]\nversion=8.2.12`);
 
       // Detectar
-      const appConfig = loadAppConfig(tmpDir, noop);
-      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const fsAdapter = createNodeFilesystemAdapter();
+      const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+      const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       
       // PHP no se lista como servicio standalone normalmente, pero verificamos availablePhp en Apache
       const apache = services.find(s => s.type === 'apache');
@@ -142,8 +145,8 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       }
 
       // Verificar detección directa con getServiceBinPath
-      const { getServiceBinPath } = await import('../electron/services-detector.js');
-      const phpBin = getServiceBinPath(tmpDir, 'php', '8.2.12', noop);
+      const { getServiceBinPath } = await import('../src/neutralino/lib/services-detector.js');
+      const phpBin = await getServiceBinPath(fsAdapter, tmpDir, 'php', '8.2.12', noop);
       assert.ok(phpBin, 'getServiceBinPath no encontró php.exe en carpeta con nombre no estándar');
       console.log('[TEST] PHP detectado en:', phpBin);
     } finally {
@@ -178,8 +181,9 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
         // app.ini
         fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=2.4.0\n[php]\nversion=8.2.0`);
 
-        const appConfig = loadAppConfig(tmpDir, noop);
-        const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+        const fsAdapter = createNodeFilesystemAdapter();
+        const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+        const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
         const apache = services.find(s => s.type === 'apache');
 
         assert.ok(apache, 'apache no encontrado');
@@ -217,14 +221,14 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir));
 
       // Verificar que el binario esté presente
-      const { getServiceBinPath } = await import('../electron/services-detector.js');
-      const phpBinPath = getServiceBinPath(tmpDir, 'php', phpVersion, console.log);
+      const { getServiceBinPath } = await import('../src/neutralino/lib/services-detector.js');
+      const phpBinPath = await getServiceBinPath(fsAdapter, tmpDir, 'php', phpVersion, console.log);
       assert.ok(phpBinPath, `PHP ${phpVersion} no detectado tras instalación`);
       console.log(`[TEST] PHP binario encontrado en: ${phpBinPath}`);
 
       // Verificar que aparezca en availableVersions
-      const { getAvailableVersions } = await import('../electron/services-detector.js');
-      const availableVersions = getAvailableVersions(tmpDir, 'php');
+      const { getAvailableVersions } = await import('../src/neutralino/lib/services-detector.js');
+      const availableVersions = await getAvailableVersions(fsAdapter, tmpDir, 'php');
       assert.ok(availableVersions.includes(phpVersion), `PHP ${phpVersion} no en availableVersions: ${availableVersions.join(', ')}`);
       console.log(`[TEST] Versiones PHP disponibles: ${availableVersions.join(', ')}`);
 
@@ -237,8 +241,9 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       // app.ini con Apache y PHP
       fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=2.4.66\n[php]\nversion=${phpVersion}`);
 
-      const appConfig = loadAppConfig(tmpDir, noop);
-      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const fsAdapter = createNodeFilesystemAdapter();
+      const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+      const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const apache = services.find(s => s.type === 'apache');
       assert.ok(apache, 'Apache no detectado');
       assert.ok(apache.availablePhpVersions.includes(phpVersion), `PHP ${phpVersion} no en availablePhpVersions de Apache: ${apache.availablePhpVersions.join(', ')}`);
@@ -265,13 +270,14 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
 
       console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir).slice(0, 10), '...'); // primeros 10
 
-      const { getServiceBinPath } = await import('../electron/services-detector.js');
-      const apacheBinPath = getServiceBinPath(tmpDir, 'apache', apacheVersion, console.log);
+      const { getServiceBinPath } = await import('../src/neutralino/lib/services-detector.js');
+      const apacheBinPath = await getServiceBinPath(fsAdapter, tmpDir, 'apache', apacheVersion, console.log);
       assert.ok(apacheBinPath, `Apache ${apacheVersion} no detectado tras instalación`);
       console.log(`[TEST] Apache binario encontrado en: ${apacheBinPath}`);
 
-      const appConfig = loadAppConfig(tmpDir, noop);
-      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const fsAdapter = createNodeFilesystemAdapter();
+      const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+      const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const apache = services.find(s => s.type === 'apache');
       assert.ok(apache, 'Apache no detectado en servicios');
       assert.equal(apache.isInstalled, true, 'Apache no marcado como instalado');
@@ -280,7 +286,7 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       fs.rmSync(destDir, { recursive: true, force: true });
       // app.ini con versión para que aparezca en servicios
       fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=${apacheVersion}`);
-      const servicesAfter = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(tmpDir, noop), log: noop });
+      const servicesAfter = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: await loadAppConfig(fsAdapter, tmpDir, noop), log: noop });
       const apacheAfter = servicesAfter.find(s => s.type === 'apache');
       assert.ok(apacheAfter);
       assert.equal(apacheAfter.isInstalled, false, 'Apache debería estar no instalado tras borrar carpeta');
@@ -306,13 +312,14 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
 
       console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir).slice(0, 10), '...');
 
-      const { getServiceBinPath } = await import('../electron/services-detector.js');
-      const mysqlBinPath = getServiceBinPath(tmpDir, 'mysql', mysqlVersion, console.log);
+      const { getServiceBinPath } = await import('../src/neutralino/lib/services-detector.js');
+      const mysqlBinPath = await getServiceBinPath(fsAdapter, tmpDir, 'mysql', mysqlVersion, console.log);
       assert.ok(mysqlBinPath, `MySQL ${mysqlVersion} no detectado tras instalación`);
       console.log(`[TEST] MySQL binario encontrado en: ${mysqlBinPath}`);
 
-      const appConfig = loadAppConfig(tmpDir, noop);
-      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const fsAdapter = createNodeFilesystemAdapter();
+      const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+      const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const mysql = services.find(s => s.type === 'mysql');
       assert.ok(mysql, 'MySQL no detectado en servicios');
       assert.equal(mysql.isInstalled, true, 'MySQL no marcado como instalado');
@@ -321,7 +328,7 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       fs.rmSync(destDir, { recursive: true, force: true });
       // app.ini con versión
       fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[mysql]\nversion=${mysqlVersion}`);
-      const servicesAfter = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(tmpDir, noop), log: noop });
+      const servicesAfter = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: await loadAppConfig(fsAdapter, tmpDir, noop), log: noop });
       const mysqlAfter = servicesAfter.find(s => s.type === 'mysql');
       assert.ok(mysqlAfter);
       assert.equal(mysqlAfter.isInstalled, false, 'MySQL debería estar no instalado tras borrar carpeta');
@@ -347,13 +354,14 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
 
       console.log(`[TEST] Contenido de ${destDir}:`, fs.readdirSync(destDir));
 
-      const { getServiceBinPath } = await import('../electron/services-detector.js');
-      const mailpitBinPath = getServiceBinPath(tmpDir, 'mailpit', mailpitVersion, console.log);
+      const { getServiceBinPath } = await import('../src/neutralino/lib/services-detector.js');
+      const mailpitBinPath = await getServiceBinPath(fsAdapter, tmpDir, 'mailpit', mailpitVersion, console.log);
       assert.ok(mailpitBinPath, `MailPit ${mailpitVersion} no detectado tras instalación`);
       console.log(`[TEST] MailPit binario encontrado en: ${mailpitBinPath}`);
 
-      const appConfig = loadAppConfig(tmpDir, noop);
-      const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+      const fsAdapter = createNodeFilesystemAdapter();
+      const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+      const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const mailpit = services.find(s => s.type === 'mailpit');
       assert.ok(mailpit, 'MailPit no detectado en servicios');
       assert.equal(mailpit.isInstalled, true, 'MailPit no marcado como instalado');
@@ -362,7 +370,7 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       fs.rmSync(destDir, { recursive: true, force: true });
       // app.ini con versión
       fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[mailpit]\nversion=${mailpitVersion}`);
-      const servicesAfter = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(tmpDir, noop), log: noop });
+      const servicesAfter = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: await loadAppConfig(fsAdapter, tmpDir, noop), log: noop });
       const mailpitAfter = servicesAfter.find(s => s.type === 'mailpit');
       assert.ok(mailpitAfter);
       assert.equal(mailpitAfter.isInstalled, false, 'MailPit debería estar no instalado tras borrar carpeta');
@@ -392,8 +400,9 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
     fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=2.4.66\n[php]\nversion=8.2.30 (NTS)`);
 
     // Detectar servicios
-    const appConfig = loadAppConfig(tmpDir, noop);
-    const services = detectServices({ appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
+    const fsAdapter = createNodeFilesystemAdapter();
+    const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
 
     const apache = services.find(s => s.type === 'apache');
     assert.ok(apache, 'Apache no detectado');
@@ -402,3 +411,4 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
     assert.equal(apache.phpVersion, '8.2.30 (NTS)', 'PHP version no asignada correctamente a Apache');
   });
 });
+

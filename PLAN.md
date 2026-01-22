@@ -25,9 +25,13 @@
 ---
 
 ##  Estado Actual del Sistema
-- **Ultima actualización**: 20 de enero de 2026.
-- **Flujo de Desarrollo**: Estable con Neutralino como runtime principal por su ligereza.
-- **Detección de Apache**: Refinada para manejar binarios estándar de Windows (VC18+) dentro de la propia arquitectura independiente del proyecto.
+- **Última actualización**: 22 de enero de 2026.
+- **Arquitectura Refactorizada**: Implementado principio DRY estricto:
+  - **lib/ como fuente única**: Toda la lógica de negocio centralizada en [src/neutralino/lib/](src/neutralino/lib/).
+  - **dev-server.js**: Servidor API separado (Express en puerto 5174) que expone funciones reales de lib/ vía HTTP.
+  - **vite.config.js simplificado**: Solo hace proxy `/api/*` → `localhost:5174`, CERO implementación de lógica.
+  - **Eliminada duplicación**: ~200 líneas de código duplicado eliminadas de vite.config.js.
+- **Flujo de Desarrollo**: Neutralino como runtime principal, desarrollo con doble servidor (API + Vite).
 
 ---
 
@@ -35,5 +39,10 @@
 - [x] Migración robusta a Neutralino.
 - [x] Implementación de política de "No Duplicación".
 - [x] Corrección de detección de PHP en entornos TS/NTS.
-- [ ] Implementar visor de logs en tiempo real (app-log.txt).
+- [x] Refactorización arquitectónica: lib/ como fuente única de verdad.
+- [x] Creación de dev-server.js (servidor API real para desarrollo).
+- [x] Simplificación de vite.config.js (eliminadas ~200 líneas de duplicación).
+- [x] Browser-compatibility en services-detector.js (sin módulos Node.js).
+- [ ] Integrar dev-server.js en flujo npm run dev (actualmente en testing).
+- [ ] Implementar visor de logs en tiempo real (app-debug.log).
 - [ ] Añadir soporte para Nginx y PostgreSQL.

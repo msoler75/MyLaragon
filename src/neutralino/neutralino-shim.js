@@ -1,4 +1,7 @@
-// Neutralino compatibility shim for globalThis.electronAPI
+// WebServDev API Shim - Unified API for Neutralino
+import { createFilesystemAdapter } from './lib/fs-adapter.js';
+import { detectServices, loadAppConfig, getAvailableVersions } from './lib/services-detector.js';
+
 (function(){
   // --- SISTEMA DE LOGS PERSISTENTES (CAPA TEMPRANA) ---
   const originalConsole = {
@@ -229,10 +232,10 @@
   // Flag global para evitar saturación durante instalaciones
   globalThis.__is_installing = false;
 
-  // SI YA EXISTE electronAPI (estamos en Electron), no sobreescribir
-  // Pero podemos registrar el shim para que los logs funcionen en Electron también si se desea
-  if (typeof globalThis.electronAPI !== 'undefined' && !globalThis.NL_TOKEN) {
-    console.log('[SHIM] Detectado Electron, saltando implementación de globalThis.electronAPI');
+  // SI YA EXISTE webservAPI en window o globalThis, no sobreescribir
+  const target = typeof window !== 'undefined' ? window : globalThis;
+  if (typeof target.webservAPI !== 'undefined') {
+    console.log('[SHIM] API ya existe, saltando implementación');
     return;
   }
   
@@ -917,18 +920,23 @@
     throw new Error('No execution method available');
   }
 
-  // Guardar referencia al API existente si estamos en Electron
-  const existingElectronAPI = globalThis.electronAPI;
+  // Inicializar la API WebServDev
+  const apiTarget = typeof window !== 'undefined' ? window : globalThis;
+  const existingAPI = apiTarget.webservAPI;
 
-  globalThis.electronAPI = {
+  const apiImplementation = {
     getServices: async (hiddenServices)=>{
       const startTime = Date.now();
       console.log('[SHIM] >>> getServices INICIO');
       try{
-        const cfgRaw = localStorage.getItem('WebServDev-config');
-        const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
+        // Crear adaptador de filesystem
+        const fsAdapter = createFilesystemAdapter();
         
-        let basePath = cfg.basePath || defaultConfig.basePath || appRoot;
+        // Obtener configuración del usuario
+        const cfgRaw = localStorage.getItem('WebServDev-config');
+        const userConfig = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
+        
+        let basePath = userConfig.basePath || defaultConfig.basePath || appRoot;
         
         // RESOLUCIÓN DE RUTAS ABSOLUTAS (Crucial para detección y ejecución)
         if (basePath === '.' || basePath === './' || !basePath.includes(':')) {
@@ -947,103 +955,41 @@
         console.log('[SHIM] Path Base:', basePath);
         console.log('[SHIM] appRoot:', appRoot);
 
-        // Cargar configuración de servicios
-        console.log('[SHIM] Cargando services.json...');
-        let servicesList = await loadServicesConfig();
-        console.log('[SHIM] services.json cargado. Cantidad:', servicesList?.length);
+        // Cargar configuración de app.ini
+        console.log('[SHIM] Cargando configuración de app.ini...');
+        const appConfig = await loadAppConfig(fsAdapter, basePath, console.log);
+        console.log('[SHIM] Configuración cargada:', Object.keys(appConfig).length, 'secciones');
         
-        if (!Array.isArray(servicesList) || servicesList.length === 0) {
-          console.warn('[SHIM] Fallback interno activado');
-          servicesList = [
-            { "id": "php", "name": "PHP", "type": "php", "version": "8.2", "port": null, "processName": "php.exe" },
-            { "id": "apache", "name": "Apache", "type": "apache", "version": "2.4", "port": 80, "processName": "httpd.exe" },
-            { "id": "mysql", "name": "MySQL", "type": "mysql", "version": "8.0", "port": 3306, "processName": "mysqld.exe" },
-            { "id": "nginx", "name": "Nginx", "type": "nginx", "version": "1.22", "port": 80, "processName": "nginx.exe" },
-            { "id": "mailpit", "name": "MailPit", "type": "mailpit", "version": "1.8", "port": 8025, "processName": "mailpit.exe" }
-          ];
-        }
-
-        // Ejecutar netstat una vez (con caché)
+        // Ejecutar netstat una vez (con caché) para ports
         console.log('[SHIM] Refrescando Netstat...');
         await getNetstatData();
         
-        // Filtrar servicios visibles
-        const hiddenArray = Array.isArray(hiddenServices) ? hiddenServices : [];
-        const visibleServices = servicesList.filter(s => !hiddenArray.includes(s.name));
-        
-        console.log(`[SHIM] Mapeando ${visibleServices.length} servicios visibles...`);
-
-        let completed = 0;
-        const results = await Promise.all(visibleServices.map(async (service) => {
-          try {
-            const svcStart = Date.now();
-            console.log(`[SHIM] [${service.name}] Iniciando chequeo...`);
-            
-            const status = await checkServiceStatus(service, basePath);
-            const enriched = { ...service, ...status };
-
-            const type = (service.type || service.id || '').toLowerCase();
-            const exeMap = {
-              'apache': 'httpd.exe', 'nginx': 'nginx.exe', 'mysql': 'mysqld.exe',
-              'mariadb': 'mysqld.exe', 'postgresql': 'postgres.exe', 'redis': 'redis-server.exe',
-              'memcached': 'memcached.exe', 'mailpit': 'mailpit.exe', 'mongodb': 'mongod.exe', 'php': 'php.exe'
-            };
-
-            const mainExe = exeMap[type];
-            if (mainExe) {
-              console.log(`[SHIM] [${service.name}] Buscando versiones para ${type}...`);
-              enriched.availableVersions = await getAvailableVersions(basePath, type);
-              
-              let version = service.version;
-              if (version && enriched.availableVersions.length > 0 && !enriched.availableVersions.includes(version)) {
-                const match = enriched.availableVersions.find(v => v.startsWith(version));
-                version = match || enriched.availableVersions[0];
-              } else if (!version) {
-                version = enriched.availableVersions.length > 0 ? enriched.availableVersions[0] : null;
-              }
-              
-              enriched.version = version;
-              if (version) {
-                console.log(`[SHIM] [${service.name}] Buscando ejecutable ${mainExe} v${version}...`);
-                const binPath = await findExecutable(type, version, mainExe, basePath);
-                enriched.isInstalled = binPath !== null;
-              } else {
-                enriched.isInstalled = false;
-              }
-            }
-            completed++;
-            console.log(`[SHIM] [${service.name}] Finalizado en ${Date.now() - svcStart}ms (${completed}/${visibleServices.length})`);
-            return enriched;
-          } catch (e) {
-            console.error(`[SHIM] [${service.name}] ERROR:`, e);
-            return { ...service, status: 'error', details: e.message };
-          }
-        }));
-
-        console.log('[SHIM] Enriqueciendo Apache con PHP...');
-        let phpVersions = await getAvailableVersions(basePath, 'php');
-        let phpBin = null;
-        for (const v of phpVersions) {
-          const bin = await findExecutable('php', v, 'php.exe', basePath);
-          if (bin) { phpBin = bin; break; }
-        }
-
-        for(const svc of results){
-          if(svc && (svc.type === 'apache' || svc.name === 'Apache')){
-            svc.requiresPhp = true;
-            svc.dependenciesReady = svc.isInstalled && !!phpBin;
-            svc.availablePhpVersions = phpVersions;
-          }
-        }
-        
-        // Agregar ocultos
-        hiddenArray.forEach(name => {
-          const s = servicesList.find(x => x.name === name);
-          if(s) results.push({ ...s, status: 'hidden' });
+        // Delegar la detección completa a la librería
+        console.log('[SHIM] Llamando a detectServices...');
+        let allServices = await detectServices({
+          fsAdapter,
+          appPath: basePath,
+          userConfig,
+          appConfig,
+          log: console.log
         });
-
-        console.log(`[SHIM] <<< getServices FIN (Total: ${Date.now() - startTime}ms, Items: ${results.length})`);
-        return results;
+        
+        console.log(`[SHIM] detectServices retornó ${allServices.length} servicios`);
+        
+        // Filtrar servicios ocultos
+        const hiddenArray = Array.isArray(hiddenServices) ? hiddenServices : [];
+        const visibleServices = allServices.filter(s => !hiddenArray.includes(s.name));
+        
+        // Agregar servicios ocultos al final con status 'hidden'
+        hiddenArray.forEach(name => {
+          const s = allServices.find(x => x.name === name);
+          if(s) {
+            visibleServices.push({ ...s, status: 'hidden' });
+          }
+        });
+        
+        console.log(`[SHIM] <<< getServices FIN (Total: ${Date.now() - startTime}ms, Items: ${visibleServices.length})`);
+        return visibleServices;
       }catch(e){
         console.error('[SHIM] !!! ERROR FATAL getServices:', e);
         return [
@@ -1433,9 +1379,9 @@
     },
     openDevTools: async () => {
       // 1. Prioridad: Electron (si ya existía el API antes del shim)
-      if (existingElectronAPI && typeof existingElectronAPI.openDevTools === 'function') {
+      if (existingAPI && typeof existingAPI.openDevTools === 'function') {
         try {
-          await existingElectronAPI.openDevTools();
+          await existingAPI.openDevTools();
           console.log('[SHIM] DevTools abierto via Electron');
           return;
         } catch (e) {
@@ -1668,13 +1614,148 @@
     },
     updateServiceVersion: async (type, version) => {
       try {
+        console.log(`[SHIM] updateServiceVersion: ${type} -> ${version}`);
         const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
         if (!cfg.versions) cfg.versions = {};
         cfg.versions[type] = version;
         localStorage.setItem('WebServDev-config', JSON.stringify(cfg));
+        
+        // Si cambiamos PHP, actualizar configuración de Apache
+        if (type.toLowerCase() === 'php') {
+          console.log(`[SHIM] Versión PHP cambió a ${version}, actualizando configuración de Apache...`);
+          try {
+            let basePath = cfg.basePath || defaultConfig.basePath || appRoot;
+            
+            // Resolver ruta absoluta si es necesaria
+            if (basePath === '.' || basePath === './' || !basePath.includes(':')) {
+              try {
+                const res = await execCommand('cd');
+                if (res && res.stdout) {
+                  basePath = res.stdout.trim();
+                  console.log('[SHIM] basePath resuelto:', basePath);
+                }
+              } catch(e) {
+                console.warn('[SHIM] No se pudo resolver ruta absoluta:', e.message);
+              }
+            }
+            
+            // Buscar PHP binario y módulo
+            const phpBin = await findExecutable('php', version, 'php.exe', basePath);
+            if (!phpBin) {
+              console.warn(`[SHIM] No se encontró PHP ${version}, no se puede actualizar Apache`);
+              return { success: true, warning: 'PHP no encontrado' };
+            }
+            
+            const phpDir = phpBin.substring(0, phpBin.lastIndexOf('\\')).replace(/\\/g, '/');
+            console.log(`[SHIM] PHP encontrado en: ${phpDir}`);
+            
+            // Buscar módulo PHP para Apache
+            let phpModulePath = null;
+            try {
+              const phpDirContent = await readDirShim(phpDir);
+              const phpDll = phpDirContent.find(f => f.match(/^php\d+apache2_4\.dll$/i));
+              if (phpDll) {
+                phpModulePath = `${phpDir}/${phpDll}`;
+                console.log(`[SHIM] Módulo PHP encontrado: ${phpModulePath}`);
+              } else {
+                console.warn(`[SHIM] No se encontró módulo PHP (php*apache2_4.dll) en ${phpDir}`);
+              }
+            } catch(e) {
+              console.warn(`[SHIM] Error buscando módulo PHP: ${e.message}`);
+            }
+            
+            if (!phpModulePath) {
+              return { success: true, warning: 'Módulo PHP para Apache no encontrado' };
+            }
+            
+            // Buscar httpd.conf de Apache
+            const apacheVersions = await getAvailableVersions(basePath, 'apache');
+            if (apacheVersions.length === 0) {
+              console.warn(`[SHIM] No se encontró Apache instalado`);
+              return { success: true, warning: 'Apache no instalado' };
+            }
+            
+            const apacheVersion = cfg.versions?.apache || apacheVersions[0];
+            const apacheBin = await findExecutable('apache', apacheVersion, 'httpd.exe', basePath);
+            if (!apacheBin) {
+              console.warn(`[SHIM] No se encontró Apache ${apacheVersion}`);
+              return { success: true, warning: 'Apache no encontrado' };
+            }
+            
+            const apacheBase = apacheBin.substring(0, apacheBin.lastIndexOf('\\')).replace(/\\/g, '/').replace('/bin', '');
+            const httpdConfPath = `${apacheBase}/conf/httpd.conf`;
+            console.log(`[SHIM] Actualizando httpd.conf: ${httpdConfPath}`);
+            
+            // Leer httpd.conf
+            const httpdConf = await readFileShim(httpdConfPath);
+            if (!httpdConf) {
+              console.warn(`[SHIM] No se pudo leer httpd.conf`);
+              return { success: true, warning: 'No se pudo leer httpd.conf' };
+            }
+            
+            // Actualizar o agregar LoadModule y PHPIniDir
+            let updatedConf = httpdConf;
+            const loadModuleRegex = /LoadModule\s+php_module\s+"[^"]*"/gi;
+            const phpIniDirRegex = /PHPIniDir\s+"[^"]*"/gi;
+            
+            const newLoadModule = `LoadModule php_module "${phpModulePath}"`;
+            const newPHPIniDir = `PHPIniDir "${phpDir}"`;
+            
+            if (loadModuleRegex.test(httpdConf)) {
+              // Reemplazar LoadModule existente
+              updatedConf = updatedConf.replace(loadModuleRegex, newLoadModule);
+              console.log(`[SHIM] LoadModule actualizado en httpd.conf`);
+            } else {
+              // Agregar LoadModule antes del primer LoadModule o al final de los LoadModule
+              const firstLoadModule = updatedConf.search(/LoadModule\s+\w+\s+"[^"]*"/i);
+              if (firstLoadModule !== -1) {
+                updatedConf = updatedConf.substring(0, firstLoadModule) + 
+                            `${newLoadModule}\n` + 
+                            updatedConf.substring(firstLoadModule);
+                console.log(`[SHIM] LoadModule agregado en httpd.conf`);
+              } else {
+                updatedConf += `\n${newLoadModule}\n`;
+                console.log(`[SHIM] LoadModule agregado al final de httpd.conf`);
+              }
+            }
+            
+            if (phpIniDirRegex.test(updatedConf)) {
+              // Reemplazar PHPIniDir existente
+              updatedConf = updatedConf.replace(phpIniDirRegex, newPHPIniDir);
+              console.log(`[SHIM] PHPIniDir actualizado en httpd.conf`);
+            } else {
+              // Agregar PHPIniDir después de LoadModule php_module
+              const phpModuleIndex = updatedConf.indexOf(newLoadModule);
+              if (phpModuleIndex !== -1) {
+                const insertIndex = updatedConf.indexOf('\n', phpModuleIndex) + 1;
+                updatedConf = updatedConf.substring(0, insertIndex) + 
+                            `${newPHPIniDir}\n` + 
+                            updatedConf.substring(insertIndex);
+                console.log(`[SHIM] PHPIniDir agregado en httpd.conf`);
+              } else {
+                updatedConf += `\n${newPHPIniDir}\n`;
+                console.log(`[SHIM] PHPIniDir agregado al final de httpd.conf`);
+              }
+            }
+            
+            // Escribir httpd.conf actualizado
+            await writeFileShim(httpdConfPath, updatedConf);
+            console.log(`[SHIM] httpd.conf actualizado correctamente`);
+            console.log(`[SHIM] ✓ Apache ahora usará PHP ${version}`);
+            
+            return { success: true, message: `Apache configurado para usar PHP ${version}` };
+          } catch(e) {
+            console.error(`[SHIM] Error actualizando configuración de Apache: ${e.message}`);
+            return { success: true, warning: `Error actualizando Apache: ${e.message}` };
+          }
+        }
+        
         return { success: true };
-      } catch(e) { return { success: false, message: e.message }; }
+      } catch(e) { 
+        console.error('[SHIM] Error en updateServiceVersion:', e.message);
+        return { success: false, message: e.message }; 
+      }
     },
     openConfigFile: async ({ path: filePath, type = 'file' }) => {
       try {
@@ -1698,4 +1779,8 @@
       await execCommand('control sysdm.cpl,,3');
     }
   };
+
+  // Registrar la API en el target apropiado (window o globalThis)
+  apiTarget.webservAPI = apiImplementation;
+  console.log('[SHIM] webservAPI registrado correctamente en', typeof window !== 'undefined' ? 'window' : 'globalThis');
 })();

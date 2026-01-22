@@ -48,6 +48,14 @@ npm run dist
 
 Para más detalles técnicos, consulta [DEVELOPMENT.md](DEVELOPMENT.md).
 
+##  Documentación Técnica
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)**: Arquitectura detallada del sistema, principios DRY, flujo de datos dev/prod
+- **[SERVICES.md](SERVICES.md)**: Compatibilidad de servicios (Apache+PHP, NGINX+PHP), módulos requeridos y procedimientos para actualizaciones
+- **[DEVELOPMENT.md](DEVELOPMENT.md)**: Guía de desarrollo, arquitectura y contribuciones
+- **[ROADMAP.md](ROADMAP.md)**: Hoja de ruta y funcionalidades planificadas
+- **[HISTORY.md](HISTORY.md)**: Historial de cambios y versiones
+
 ##  Licencia
 
 Este proyecto está bajo la Licencia MIT.

@@ -8,9 +8,10 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- Cache buster for the shim -->
-    <script>
-      document.write('<script src="/src/neutralino/neutralino-shim.js?v=' + Date.now() + '"><\/script>');
+    <!-- Cache buster for the shim - Now ES Module -->
+    <script type="module">
+      const shimUrl = '/src/neutralino/neutralino-shim.js?v=' + Date.now();
+      /* @vite-ignore */ import(shimUrl);
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>

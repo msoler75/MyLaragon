@@ -20,12 +20,16 @@ import {
   Eye, 
   ChevronUp, 
   ChevronDown, 
-  AlertCircle 
+  AlertCircle,
+  FileText,
+  Code,
+  CheckCircle
 } from 'lucide-react';
 
 function ServicesView({ services, hiddenServices, processingServices = [], isBulkRunning, loading, onToggleVisibility, onStart, onStop, onStartAll, onStopAll, t, loadServices }) {
   const [showHidden, setShowHidden] = useState(false);
   const [menuOpen, setMenuOpen] = useState(null);
+  const [notification, setNotification] = useState(null);
   const [activeSubMenu, setActiveSubMenu] = useState(null); // 'version' or 'php'
 
   // Helper function to shorten long version strings for the UI
@@ -39,10 +43,23 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
 
   const handleChangeVersion = async (type, version) => {
     try {
-      const result = await window.electronAPI.updateServiceVersion(type, version);
+      const result = await window.webservAPI.updateServiceVersion(type, version);
       if (result.success) {
         setMenuOpen(null);
         setActiveSubMenu(null);
+        
+        // Mostrar mensaje si PHP cambió y Apache se actualizó
+        if (type === 'php' && result.message) {
+          console.log(`✓ ${result.message}`);
+          setNotification({ type: 'success', message: result.message });
+          setTimeout(() => setNotification(null), 4000);
+        }
+        if (result.warning) {
+          console.warn(`⚠ ${result.warning}`);
+          setNotification({ type: 'warning', message: result.warning });
+          setTimeout(() => setNotification(null), 4000);
+        }
+        
         loadServices(); // Force refresh to show new version
       } else {
         alert("Error: " + result.message);
@@ -93,6 +110,18 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
 
   return (
     <div className="space-y-4 pb-10">
+      {/* Notificación Toast */}
+      {notification && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl border flex items-center space-x-3 animate-in slide-in-from-top-2 fade-in duration-300 ${
+          notification.type === 'success' 
+            ? 'bg-app-success/10 border-app-success/30 text-app-success' 
+            : 'bg-app-warning/10 border-app-warning/30 text-app-warning'
+        }`}>
+          <CheckCircle size={20} />
+          <span className="text-sm font-bold">{notification.message}</span>
+        </div>
+      )}
+      
       <div className="flex items-center justify-between mb-10">
         <div className="flex items-center space-x-2">
           <button 
@@ -123,14 +152,14 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
 
         <div className="flex items-center space-x-2">
           <button 
-            onClick={() => window.electronAPI.openAppFolder()}
+            onClick={() => window.webservAPI.openAppFolder()}
             className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
           >
             <Folder size={12} />
             <span>{t.app}</span>
           </button>
           <button 
-            onClick={() => window.electronAPI.openDocumentRoot()}
+            onClick={() => window.webservAPI.openDocumentRoot()}
             className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
           >
             <ExternalLink size={12} />
@@ -174,7 +203,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
               {menuOpen === service.name && (
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => { setMenuOpen(null); setActiveSubMenu(null); }}></div>
-                  <div className={`absolute top-10 right-3 ${activeSubMenu ? 'w-80' : 'w-48'} bg-app-surface border border-app-border rounded-xl shadow-2xl z-40 py-1.5 animate-in fade-in zoom-in-95 origin-top-right overflow-hidden transition-all duration-75`}>
+                  <div className={`absolute top-10 right-3 ${activeSubMenu ? 'w-56' : 'w-48'} bg-app-surface border border-app-border rounded-xl shadow-2xl z-40 py-1.5 animate-in fade-in zoom-in-95 origin-top-right overflow-hidden transition-all duration-75`}>
                     {!activeSubMenu ? (
                       <>
                         <div className="px-3 py-1 mb-1 border-b border-app-border">
@@ -214,7 +243,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                         {service.name === 'MySQL' && (
                           <>
                             <button 
-                              onClick={() => { window.electronAPI.openStartupLog(); setMenuOpen(null); }} 
+                              onClick={() => { window.webservAPI.openStartupLog(); setMenuOpen(null); }} 
                               className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
                             >
                               <FileText size={12} />
@@ -229,7 +258,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                           return (
                             <button 
                               key={idx}
-                              onClick={() => { window.electronAPI.openConfigFile(conf); setMenuOpen(null); }} 
+                              onClick={() => { window.webservAPI.openConfigFile(conf); setMenuOpen(null); }} 
                               className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
                             >
                               {conf.type === 'folder' ? <Folder size={12} /> : (isLog ? <FileText size={12} /> : <Code size={12} />)}
@@ -425,17 +454,17 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
 
               <div className="h-8 mb-3 flex items-center">
                 {service.name === 'Mailpit' && isRunning && !isProcessing && (
-                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost:8025')} className="w-full py-1.5 bg-app-primary/10 text-app-primary hover:bg-app-primary hover:text-white rounded-lg text-[10px] font-black border border-app-primary/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
+                  <button onClick={() => window.webservAPI.openInBrowser('http://localhost:8025')} className="w-full py-1.5 bg-app-primary/10 text-app-primary hover:bg-app-primary hover:text-white rounded-lg text-[10px] font-black border border-app-primary/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
                     <ExternalLink size={10} /><span>{t.openMail}</span>
                   </button>
                 )}
                 {service.type === 'apache' && isRunning && !isProcessing && (
-                  <button onClick={() => window.electronAPI.openInBrowser('http://localhost')} className="w-full py-1.5 bg-app-success/10 text-app-success hover:bg-app-success hover:text-white rounded-lg text-[10px] font-black border border-app-success/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
+                  <button onClick={() => window.webservAPI.openInBrowser('http://localhost')} className="w-full py-1.5 bg-app-success/10 text-app-success hover:bg-app-success hover:text-white rounded-lg text-[10px] font-black border border-app-success/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
                     <Globe size={10} /><span>{t.openWeb}</span>
                   </button>
                 )}
                 {service.type === 'mysql' && isRunning && !isProcessing && (
-                  <button onClick={() => window.electronAPI.openDbTool()} className="w-full py-1.5 bg-app-warning/10 text-app-warning hover:bg-app-warning hover:text-white rounded-lg text-[10px] font-black border border-app-warning/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
+                  <button onClick={() => window.webservAPI.openDbTool()} className="w-full py-1.5 bg-app-warning/10 text-app-warning hover:bg-app-warning hover:text-white rounded-lg text-[10px] font-black border border-app-warning/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
                     <Database size={10} /><span>{t.openDb}</span>
                   </button>
                 )}

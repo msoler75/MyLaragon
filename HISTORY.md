@@ -2,6 +2,40 @@
 
 ##  Cambios Recientes (Enero 2026)
 
+### Refactorización Arquitectónica (22/01/2026) 
+**Principio DRY Estricto - Eliminación Total de Duplicación**
+
+#### Problema Identificado
+- El archivo `vite.config.js` contenía ~200 líneas implementando lógica de API (filesystem, detección de servicios).
+- Esta lógica duplicaba o simulaba las funciones ya existentes en `lib/`.
+- Violación crítica del principio DRY: mantenimiento doble, posibles inconsistencias.
+
+#### Solución Implementada
+1. **Centralización en lib/**: Toda la lógica de negocio movida a [src/neutralino/lib/](src/neutralino/lib/):
+   - `services-detector.js`: Detección de servicios (browser-compatible, sin módulos Node.js).
+   - `fs-adapter.js`: Abstracción de filesystem (dev vs prod).
+
+2. **Servidor API Real**: Creado [src/api/dev-server.js](src/api/dev-server.js):
+   - Express server en puerto 5174.
+   - Importa y expone las funciones REALES de lib/ vía HTTP.
+   - CERO duplicación: solo transporte (no lógica).
+
+3. **Simplificación de Vite**: [vite.config.js](vite.config.js) reducido drásticamente:
+   - Eliminadas ~140 líneas de middleware de API.
+   - Ahora solo hace PROXY: `/api/*` → `http://localhost:5174`.
+   - Plugin `api-server-launcher` inicia dev-server.js automáticamente.
+
+4. **Browser Compatibility**: services-detector.js refactorizado:
+   - Eliminado `import path from 'path'` (incompatible con browser).
+   - Creadas funciones propias: `pathJoin()`, `pathDirname()`.
+   - Ahora puede ejecutarse tanto en browser como en Node.js.
+
+#### Resultado
+- **Fuente única de verdad**: lib/ contiene TODA la lógica, sin excepciones.
+- **Modo DEV real**: En desarrollo se usan servicios reales (no simulados).
+- **Mantenibilidad**: Un solo lugar para cambiar lógica de detección/filesystem.
+- **Tests más robustos**: Tests usan las mismas funciones que producción.
+
 ### Migración Eficiente a Neutralino
 - Se resolvió el problema de la carpeta 'www/' vacía compilando automáticamente vía Vite.
 - Creado 'neutralino/dev.js' para manejar Hot-Reload sin fallos de conexión.
