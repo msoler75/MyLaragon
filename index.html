@@ -8,7 +8,10 @@
   </head>
   <body>
     <div id="root"></div>
-    <script src="/src/neutralino/neutralino-shim.js"></script>
+    <!-- Cache buster for the shim -->
+    <script>
+      document.write('<script src="/src/neutralino/neutralino-shim.js?v=' + Date.now() + '"><\/script>');
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

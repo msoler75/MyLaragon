@@ -15,7 +15,7 @@ La plataforma **WebServDev** utiliza un modelo híbrido que permite ejecutarse s
 **ESTÁ TERMINANTEMENTE PROHIBIDO** editar archivos generados. El sistema utiliza una estructura centralizada en `src/neutralino/`.
 
 1. **ARCHIVOS FUENTE**: La fuente de verdad reside en [src/neutralino/](src/neutralino/) (ej. [neutralino-shim.js](src/neutralino/neutralino-shim.js), [services.json](src/neutralino/services.json)).
-2. **COPIAS GENERADAS**: Las carpetas como [neutralino/www/](neutralino/www/) son volátiles. El script `scripts/create-symlinks.js` sincroniza los archivos desde `src/neutralino/` hacia `www/` inyectando una cabecera de advertencia.
+2. **COPIAS GENERADAS**: Las carpetas como [neutralino/www/](neutralino/www/) son volátiles. El script `scripts/sync-resources.js` sincroniza los archivos desde `src/neutralino/` hacia `www/` inyectando una cabecera de advertencia.
 3. **EDICIÓN**: NUNCA edites archivos dentro de [neutralino/www/](neutralino/www/). Si lo haces, tus cambios se perderán en el próximo build. Edita siempre el archivo correspondiente en `src/neutralino/`.
 4. **PROCESO DE BUILD**: Durante `npm run build`, el sistema asegura que las copias físicas estén actualizadas. Se usan copias físicas en lugar de enlaces simbólicos para evitar fallos en el empaquetador `resources.neu` de Neutralino en Windows.
 5. **DO NOT EDIT**: Los archivos generados contienen una advertencia al inicio del archivo. Respétala.

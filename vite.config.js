@@ -35,7 +35,7 @@ export default defineConfig({
         ['neutralino-shim.js', 'services.json', 'neutralino.js', 'bootstrap.html'].forEach(checkMasterFile);
 
         const files = fs.readdirSync(wwwDir);
-        // Archivos a preservar (generados por scripts/create-symlinks.js)
+        // Archivos a preservar (generados por scripts/sync-resources.js)
         const preserve = ['neutralino.js', 'neutralino-shim.js', 'services.json', 'vite.svg', 'bootstrap.html', 'test-services.html'];
         
         files.forEach(file => {
@@ -128,6 +128,26 @@ export default defineConfig({
       apply: 'serve',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
+          // Forzar no-cache para el shim y archivos críticos en DEV
+          if (req.url.includes('neutralino-shim.js') || req.url.includes('services.json')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+            res.setHeader('Surrogate-Control', 'no-store');
+          }
+
+          // Bloquear o simular recursos de Neutralino que dan 404 en DEV
+          if (req.url.includes('/neutralino/app.log') || req.url.includes('.well-known')) {
+            console.log(`[ViteAPI] Simulando recurso para evitar 404: ${req.url}`);
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('');
+            return;
+          }
+
+          if (req.url.startsWith('/api/')) {
+            console.log(`[ViteAPI] REQUEST: ${req.method} ${req.url}`);
+          }
+
           // Proxy para /www/services.json -> services.json en desarrollo
           if (req.url === '/www/services.json') {
             const servicesPath = path.resolve('src/neutralino/services.json');
@@ -156,14 +176,67 @@ export default defineConfig({
                 
                 console.log('[EXEC API] Ejecutando:', command);
                 // Aumentamos el timeout a 15 minutos para permitir descargas largas de servicios
+                const startTime = Date.now();
                 const { stdout, stderr } = await execAsync(command, { timeout: 900000 });
-                console.log('[EXEC API] Stdout:', stdout.slice(0, 200));
+                const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+                console.log(`[EXEC API] Finalizado en ${duration}s. Stdout:`, stdout.slice(0, 200));
+                
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ stdout, stderr, success: true }));
+                res.end(JSON.stringify({ 
+                  stdout, 
+                  stderr, 
+                  exitCode: 0, 
+                  success: true,
+                  duration 
+                }));
               } catch (err) {
-                console.error('[EXEC API] Error:', err.message);
+                console.error('[EXEC API] Error despues de', ((Date.now() - startTime) / 1000).toFixed(1), 's:', err.message);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ stdout: '', stderr: err.message, success: false }));
+                res.end(JSON.stringify({ 
+                  stdout: err.stdout || '', 
+                  stderr: err.stderr || err.message, 
+                  exitCode: err.code || 1, 
+                  success: false 
+                }));
+              }
+            });
+          }
+          // Endpoint: /api/read-file
+          else if (req.url === '/api/read-file' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+              try {
+                const { path: filePath } = JSON.parse(body);
+                const normalized = filePath.replace(/[\\\/]+/g, path.sep);
+                if (fs.existsSync(normalized)) {
+                  res.writeHead(200, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ content: fs.readFileSync(normalized, 'utf-8') }));
+                } else {
+                  res.writeHead(404, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ error: 'File not found' }));
+                }
+              } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+              }
+            });
+          }
+          // Endpoint: /api/write-file
+          else if (req.url === '/api/write-file' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+              try {
+                const { path: filePath, content } = JSON.parse(body);
+                const normalized = filePath.replace(/[\\\/]+/g, path.sep);
+                fs.mkdirSync(path.dirname(normalized), { recursive: true });
+                fs.writeFileSync(normalized, content, 'utf-8');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+              } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
               }
             });
           }
@@ -174,7 +247,15 @@ export default defineConfig({
             req.on('end', () => {
               try {
                 const { path: filePath } = JSON.parse(body);
-                const exists = fs.existsSync(filePath);
+                // Normalizar slashes para Windows/Unist compat
+                const normalized = filePath.replace(/[\\\/]+/g, path.sep);
+                const exists = fs.existsSync(normalized);
+                
+                // Loguear siempre los chequeos de ejecutables para debug
+                if (filePath.endsWith('.exe') || filePath.includes('bin/')) {
+                   console.log(`[ViteAPI] fileExists: ${normalized} -> ${exists ? '✅' : '❌'}`);
+                }
+                
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ exists }));
               } catch (err) {
@@ -190,12 +271,21 @@ export default defineConfig({
             req.on('end', () => {
               try {
                 const { path: dirPath } = JSON.parse(body);
-                if (!fs.existsSync(dirPath)) {
+                const normalized = dirPath.replace(/[\\\/]+/g, path.sep);
+                
+                if (!fs.existsSync(normalized)) {
+                  console.log(`[ViteAPI] readDir: ${normalized} -> ❌ (No existe)`);
                   res.writeHead(200, { 'Content-Type': 'application/json' });
                   res.end(JSON.stringify({ entries: null }));
                   return;
                 }
-                const entries = fs.readdirSync(dirPath);
+                const entries = fs.readdirSync(normalized).map(name => {
+                  const full = path.join(normalized, name);
+                  const isDir = fs.statSync(full).isDirectory();
+                  return { entry: name, type: isDir ? 'DIRECTORY' : 'FILE' };
+                });
+                
+                console.log(`[ViteAPI] readDir: ${normalized} -> ✅ (${entries.length} items)`);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ entries }));
               } catch (err) {
@@ -210,16 +300,44 @@ export default defineConfig({
             req.on('data', chunk => body += chunk);
             req.on('end', () => {
               try {
+                if (!body) {
+                  res.writeHead(200);
+                  res.end(JSON.stringify({ success: true, empty: true }));
+                  return;
+                }
                 const { message } = JSON.parse(body);
-                const logPath = path.resolve('app-debug.log');
-                fs.appendFileSync(logPath, message);
+                const logPath = path.resolve(__dirname, 'app-debug.log');
+                
+                // Asegurar que el mensaje termine en newline si no lo tiene
+                const finalizedMsg = message.endsWith('\n') ? message : message + '\n';
+                
+                fs.appendFileSync(logPath, finalizedMsg, 'utf8');
+                
+                // Eco en consola de Vite para depuración proactiva
+                const firstLine = finalizedMsg.split('\n')[0];
+                process.stdout.write(`\x1b[34m[PROXY-LOG]\x1b[0m ${firstLine.substring(0, 100)}${firstLine.length > 100 ? '...' : ''}\n`);
+                
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true }));
               } catch (err) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
+                console.error('❌ [PROXY-LOG] Error processing log:', err.message);
+                res.writeHead(500);
                 res.end(JSON.stringify({ success: false, error: err.message }));
               }
             });
+          }
+          // Endpoint: /api/clear-logs
+          else if (req.url === '/api/clear-logs' && req.method === 'POST') {
+            try {
+              const logPath = path.resolve(__dirname, 'app-debug.log');
+              fs.writeFileSync(logPath, '', 'utf8');
+              console.log('[ViteAPI] Logs del servidor limpiados');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (err) {
+              res.writeHead(500);
+              res.end(JSON.stringify({ success: false, error: err.message }));
+            }
           }
           else {
             next();

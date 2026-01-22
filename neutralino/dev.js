@@ -36,9 +36,23 @@ try {
     
     // Configuración para desarrollo con Vite
     config.url = 'http://localhost:5173/';
-    config.documentRoot = './www/';
-    config.enableServer = false; // Desactivar servidor para que ignore resources.neu
+    config.documentRoot = './'; 
+    config.enableServer = true; 
+    config.enableNativeAPI = true;
+    config.logging = { enabled: false };
+    if (!config.cli) config.cli = {};
+    config.cli.clientLibrary = "/www/neutralino.js"; 
     config.basePath = path.join(process.cwd(), '..').replace(/\\/g, '/');
+    
+    // Asegurar estructura mínima para evitar errores de recursos
+    if (!fs.existsSync('www/neutralino')) {
+        fs.mkdirSync('www/neutralino', { recursive: true });
+    }
+    
+    // Crear un index.html dummy si no existe para que documentRoot sea válido
+    if (!fs.existsSync('www/index.html')) {
+        fs.writeFileSync('www/index.html', '<html><body>Dev Mode</body></html>');
+    }
     
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
     

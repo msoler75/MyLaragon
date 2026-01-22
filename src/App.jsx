@@ -223,6 +223,12 @@ function App() {
     localStorage.setItem('hiddenServices', JSON.stringify(hiddenServices))
   }, [hiddenServices])
 
+  // Carga inicial de servicios
+  useEffect(() => {
+    console.log('[APP] Inicializando carga de servicios...');
+    loadServices(false);
+  }, []); // Solo al montar
+
   // Sistema de actualización inteligente: pausa durante acciones para evitar parpadeos y race conditions
   useEffect(() => {
     // Si hay procesos en curso (start/stop) o el shim indica que está instalando, pausamos el polling
@@ -474,7 +480,7 @@ function App() {
                     setIsBulkRunning(true)
                     const current = await window.electronAPI.getServices(hiddenServices)
                     setServices(current)
-                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status !== 'running')
+                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status !== 'running' && !s.isLibrary)
                     await Promise.all(visible.map(s => handleStartService(s.name)))
                     setIsBulkRunning(false)
                   }
@@ -484,7 +490,7 @@ function App() {
                     setIsBulkRunning(true)
                     const current = await window.electronAPI.getServices(hiddenServices)
                     setServices(current)
-                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status === 'running')
+                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status === 'running' && !s.isLibrary)
                     await Promise.all(visible.map(s => handleStopService(s.name)))
                     setIsBulkRunning(false)
                   }
@@ -495,16 +501,6 @@ function App() {
 
             {/* Services Manager View (Installer) */}
             <div className={activeTab === 'install' ? 'block animate-in fade-in slide-in-from-bottom-4 duration-500' : 'hidden'}>
-              <div className="flex items-center justify-between mb-6">
-                <span className="text-lg font-black text-app-text uppercase tracking-tight">Instalar</span>
-                <button 
-                  onClick={() => window.electronAPI.openAppFolder()}
-                  className="flex items-center space-x-2 bg-app-surface px-3 py-1.5 rounded-xl border border-app-border text-[10px] font-black text-app-text shadow-sm hover:bg-app-bg transition-all uppercase tracking-wider"
-                >
-                  <Folder size={12} />
-                  <span>Manual</span>
-                </button>
-              </div>
               <InstallerView t={t} onInstalled={loadServices} services={services} activeTab={activeTab} />
             </div>
 

@@ -1,6 +1,6 @@
 /**
- * Script de Sincronizaci�n de Recursos (Source -> Copy)
- * Mantiene la Fuente �nica de Verdad en src/neutralino y genera las copias para www.
+ * Script de Sincronización de Recursos (Source -> Copy)
+ * Mantiene la Fuente Única de Verdad en src/neutralino y genera las copias para www.
  */
 
 import fs from "fs";
@@ -11,7 +11,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.join(__dirname, "..");
 
-// Configuraci�n de sincronizaci�n
+// Colores ANSI
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const GRAY = "\x1b[90m";
+const RESET = "\x1b[0m";
+
+// Configuración de sincronización
 const syncConfig = [
   {
     source: "src/neutralino/neutralino.js",
@@ -39,7 +45,7 @@ function syncFile(source, target, header = "") {
   const targetPath = path.resolve(rootDir, target);
   
   if (!fs.existsSync(sourcePath)) {
-    console.warn(` Fuente maestra no encontrada: \${source}`);
+    console.warn(`${YELLOW}⚠ Fuente maestra no encontrada: ${source}${RESET}`);
     return false;
   }
 
@@ -48,45 +54,29 @@ function syncFile(source, target, header = "") {
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     let content = fs.readFileSync(sourcePath, "utf8");
+    fs.writeFileSync(targetPath, header + content);
     
-    if (header && !target.endsWith(".json")) {
-      content = header + content;
-    }
-
-    fs.writeFileSync(targetPath, content);
-    console.log(` Sincronizado: \${source} -> \${target}`);
+    // Formato solicitado: √ nombre-archivo.js          →  ruta/destino.js
+    const fileName = path.basename(source);
+    console.log(`${GREEN}√${RESET} ${fileName.padEnd(25)} ${GRAY}→${RESET} ${target}`);
     return true;
-  } catch (error) {
-    console.error(` Error sincronizando \${source}: \${error.message}`);
+  } catch (err) {
+    console.error(`${YELLOW}✘ Error sincronizando ${source}:${RESET}`, err.message);
     return false;
   }
 }
 
-function main() {
-  const args = process.argv.slice(2);
-  const command = args[0] || "create";
+console.log(`${GRAY}\nSincronizando recursos...${RESET}`);
 
-  console.log("\n Sincronizador de Recursos (Source -> www)\n");
-  console.log("".repeat(50));
-
-  if (command === "remove" || command === "clean") {
-    syncConfig.forEach(({ target }) => {
-      const targetPath = path.resolve(rootDir, target);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-        console.log(` Eliminado: \${target}`);
-      }
-    });
-    return;
+let successCount = 0;
+syncConfig.forEach(file => {
+  if (syncFile(file.source, file.target, file.header)) {
+    successCount++;
   }
+});
 
-  let successCount = 0;
-  syncConfig.forEach(({ source, target, header }) => {
-    if (syncFile(source, target, header)) successCount++;
-  });
-
-  console.log("".repeat(50));
-  console.log(`\n Sincronizaci�n completada: \${successCount} archivos preparados.\n`);
+if (successCount === syncConfig.length) {
+  console.log(`${GREEN}Sincronización completada correctamente.${RESET}\n`);
+} else {
+  console.log(`${YELLOW}Sincronización terminada con algunos errores.${RESET}\n`);
 }
-
-main();

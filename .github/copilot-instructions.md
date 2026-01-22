@@ -15,7 +15,7 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
 1. **Política de Fuente Única de Verdad (Single Source of Truth)**:
    - NUNCA edites archivos dentro de `neutralino/www/`. Son volátiles y se generan por el script de sincronización.
    - La fuente de verdad absoluta está en `src/neutralino/` (Shim, Services, Bootstrap).
-   - El script `scripts/create-symlinks.js` sincroniza estos archivos hacia `www/` realizando copias físicas para compatibilidad con Windows.
+   - El script `scripts/sync-resources.js` sincroniza estos archivos hacia `www/` realizando copias físicas para compatibilidad con Windows.
 
 2. **Manejo de Rutas**:
    - Usa `basePath` (desde `app.ini` o config) para localizar binarios en `/bin`.
@@ -44,8 +44,18 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
    - Los tests nunca NUNCA NUNCA JAMÁS deben hacer "trampas" para validarses (ej. mockear la existencia de binarios, respuestas falsas de ejecución de comandos).
    - Se deben escribir tantos test como hagan falta para cubrir los flujos críticos (instalación, detección, ejecución de comandos, logs).
 
+7- **Nunca supongas**
+   - Nunca digas 'Esto debería funcionar' o 'Esto ya debería estar bien'. Compruébalo. Para eso usa las herramientas de logging y testing.
+   - Si algo no está claro, investiga o pregunta. No des nada por sentado.
+
+8- **Nunca molestes ni delegues**
+   - Evita en lo posible molestar al usuario si tú puedes arreglártelas solo.
+   - Nunca pidas al usuario que ejecute un comando o compruebe algo ¡si tú lo puedes hacer! 
+   - Solo pide ayuda al usuario cuando no quede otro remedio.
+
+
 ## Workflows Comunes
-- **Fix Duplication**: Ejecutar `node scripts/create-symlinks.js`.
+- **Fix Duplication**: Ejecutar `node scripts/sync-resources.js`.
 - **Detección de Servicios**: Revisar `electron/services-detector.js` para lógica de puertos y `src/neutralino/neutralino-shim.js` para ejecución de comandos.
 - **Debugging Proactivo**: Si una prueba o comando falla, lee las últimas 50 líneas de `app-debug.log` antes de proponer cambios.
 - **Testing**: Usa `vitest` para lógica pura y `npm run test` para integración (activa `RUN_SLOW=1` para testear con binarios reales).

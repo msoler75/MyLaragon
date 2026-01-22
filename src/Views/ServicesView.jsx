@@ -52,12 +52,29 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
     }
   };
   
-  const visibleServices = Array.isArray(services) ? services.filter(s => !hiddenServices.includes(s.name)) : [];
+  const visibleServices = Array.isArray(services) ? services.filter(s => !hiddenServices.includes(s.name) && !s.isLibrary) : [];
   
-  const hiddenList = Array.isArray(services) ? services.filter(s => hiddenServices.includes(s.name)) : [];
+  const hiddenList = Array.isArray(services) ? services.filter(s => hiddenServices.includes(s.name) && !s.isLibrary) : [];
   
   const canStartAll = visibleServices.some(s => s.status !== 'running');
   const canStopAll = visibleServices.some(s => s.status === 'running');
+
+  if (loading && visibleServices.length === 0) {
+    return (
+      <div className="h-96 flex flex-col items-center justify-center space-y-6 animate-in fade-in duration-700">
+        <div className="relative">
+          <RefreshCw size={64} strokeWidth={1} className="text-app-primary animate-spin opacity-20" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Activity size={24} className="text-app-primary animate-pulse" />
+          </div>
+        </div>
+        <div className="text-center space-y-2">
+          <h3 className="text-sm font-black text-app-text uppercase tracking-[0.2em]">{t.scanningServices || 'Escaneando Servicios...'}</h3>
+          <p className="text-[10px] font-bold text-app-text-muted uppercase tracking-widest">{t.waitAMoment || 'Por favor, espera un momento'}</p>
+        </div>
+      </div>
+    );
+  }
 
   const getServiceIcon = (type) => {
     const iconProps = { size: 18 };

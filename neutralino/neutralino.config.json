@@ -5,14 +5,13 @@
   "version": "1.0.0",
   "defaultMode": "window",
   "port": 0,
-  "documentRoot": "/www/",
-  "url": "/index.html",
+  "documentRoot": "./",
+  "url": "http://localhost:5173/",
   "enableServer": true,
   "enableNativeAPI": true,
   "tokenSecurity": "one-time",
   "logging": {
-    "enabled": true,
-    "writeToLogFile": true
+    "enabled": false
   },
   "nativeAllowList": [
     "os.*",
@@ -43,14 +42,15 @@
   },
   "cli": {
     "binaryName": "WebServDev",
-    "resourcesPath": "./www/",
+    "resourcesPath": "./",
     "extensionsPath": "./extensions/",
-    "clientLibrary": "./www/neutralino.js",
+    "clientLibrary": "/www/neutralino.js",
     "binaryVersion": "6.4.0",
     "clientVersion": "6.4.0",
     "copyItems": [
       "./bootstrap.html",
       "./index.html"
     ]
-  }
+  },
+  "basePath": "C:/Users/msole/Documents/Proyectos/MyLaragon"
 }
