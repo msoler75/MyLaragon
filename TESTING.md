@@ -7,8 +7,7 @@ WebServDev utiliza una arquitectura de tests de 3 categorías para validar difer
 ```
 tests/
 ├── *.spec.js              # Categoría 1: Tests de funciones locales (Node.js puro)
-├── api/                   # Categoría 2: Tests de API HTTP
-│   └── *.spec.js
+├── api-endpoints.spec.js  # Categoría 2: Suite unificada de tests de API HTTP
 └── ui/                    # Categoría 3: Tests de UI/Browser (futuro)
     └── *.spec.js
 ```
@@ -46,40 +45,57 @@ test('Debe detectar versiones de PHP', () => {
 - `slow.install.spec.js` - Instalación real de servicios
 - `apache-lifecycle.spec.js` - Ciclo de vida Apache
 
+
 ## 🌐 Categoría 2: Tests de API HTTP
 
-**Entorno**: Node.js con `fetch()` contra servidor local  
-**Objetivo**: Validar endpoints del shim en modo desarrollo
+**Entorno**: Node.js con servidor dedicado por test  
+**Objetivo**: Validar todos los endpoints del dev-server.js
 
 ### Características
-- Hacen requests HTTP reales a `localhost:5173/api/*`
-- Validan que el shim responde correctamente
-- Requieren que el servidor esté corriendo (`npm run dev`)
-- Usan `fetch()` nativo de Node.js 18+
+- Inicia su propio servidor HTTP en puerto 5174 (o alternativo si ocupado)
+- Hace requests HTTP reales con `fetch()`
+- Valida responses, status codes, headers, CORS
+- Tests de integración completa (flujos end-to-end)
+- Requiere Node.js 18+ con `fetch()` nativo
 
 ### Ejemplo
 ```javascript
-test('GET /api/get-services debe devolver servicios', async () => {
-  const response = await fetch('http://localhost:5173/api/get-services');
-  const services = await response.json();
-  assert.ok(Array.isArray(services));
+describe('API REST - Dev Server Endpoints', () => {
+  before(async () => {
+    // Inicia servidor automáticamente
+    serverProcess = spawn('node', ['src/api/dev-server.js'], {...});
+  });
+  
+  it('GET /health debe responder ok', async () => {
+    const response = await fetch('http://localhost:5174/health');
+    assert.strictEqual(response.status, 200);
+  });
 });
 ```
 
-### Endpoints Testeables
-- `GET /api/get-services` - Lista de servicios
-- `POST /api/write-log` - Escritura de logs
-- `POST /api/exec-command` - Ejecución de comandos
-- `POST /api/read-file` - Lectura de archivos
-- `POST /api/write-file` - Escritura de archivos
+### Endpoints Testeados
+- `GET /health` - Health check básico
+- `HEAD /health` - Health check sin body
+- `POST /api/read-dir` - Listar directorios
+- `POST /api/file-exists` - Verificar existencia de archivos
+- `POST /api/read-file` - Leer contenido de archivos
+- `POST /api/write-log` - Escribir en logs
+- `GET /api/get-services` - Lista de servicios detectados
+- `POST /api/exec-command` - Ejecutar comandos del sistema
+- `404` - Endpoints inexistentes
+- `CORS` - Headers y preflight requests
+- **Integración completa** - Flujos end-to-end
+
+### Test Actual
+- `api-endpoints.spec.js` - Suite unificada con 20 tests que cubre todos los endpoints
 
 ### Setup
 ```bash
-# Terminal 1: Levantar servidor
-npm run dev
+# Ejecutar suite completa (inicia servidor automáticamente)
+node --test tests/api-endpoints.spec.js
 
-# Terminal 2: Ejecutar tests de API
-npm test -- tests/api/
+# O ejecutar todos los tests
+node --test tests/*.spec.js
 ```
 
 ## 🎨 Categoría 3: Tests de UI/Browser (Futuro)
@@ -118,63 +134,59 @@ export default defineConfig({
 ## 🚀 Comandos de Ejecución
 
 ```bash
-# Todos los tests (solo Categoría 1)
-npm test
+# Todos los tests (Categoría 1 + API unificada)
+node --test tests/*.spec.js
+
+# Tests de funciones locales (Categoría 1)
+node --test tests/*.spec.js --grep "no api"
+
+# Suite de API completa (Categoría 2)
+node --test tests/api-endpoints.spec.js
 
 # Test específico
-npm test -- tests/php-detection.spec.js
-
-# Tests de API (requiere servidor corriendo)
-npm test -- tests/api/
+node --test tests/php-detection.spec.js
 
 # Tests lentos (instalación real)
-RUN_SLOW=1 npm test -- tests/slow.spec.js
+RUN_SLOW=1 node --test tests/slow.spec.js
 
-# Watch mode para desarrollo
-npx vitest
+# Tests de instalación
+RUN_SLOW=1 node --test tests/slow.install.spec.js
 ```
 
 ## 📊 Resumen
 
-| Categoría | Entorno | Velocidad | Uso |
-|-----------|---------|-----------|-----|
-| 1. Funciones Locales | Node.js puro | Rápido (<100ms) | Lógica de negocio |
-| 2. API HTTP | Node.js + fetch | Medio (200-500ms) | Endpoints del shim |
-| 3. UI/Browser | jsdom/Playwright | Lento (>1s) | Componentes React |
+| Categoría | Archivo | Entorno | Velocidad | Cobertura |
+|-----------|---------|---------|-----------|-----------|
+| 1. Funciones Locales | `*.spec.js` | Node.js puro | Rápido (<100ms) | Lógica de negocio, filesystem |
+| 2. API HTTP | `api-endpoints.spec.js` | Node.js + servidor | Medio (2-10s) | Todos los endpoints REST |
+| 3. UI/Browser | `ui/*.spec.js` | jsdom/Playwright | Lento (>1s) | Componentes React |
 
 ## ⚙️ Configuración
 
-**vitest.config.js** (Categoría 1 y 2):
-```javascript
-export default defineConfig({
-  test: {
-    environment: 'node', // Sin jsdom
-    include: ['tests/**/*.spec.js'],
-    exclude: ['tests/ui/**'] // UI tests separados
-  }
-});
-```
+**Entorno**: Node.js 18+ con test runner integrado  
+**Framework**: `node --test` (sin vitest para simplicidad)
 
-**package.json**:
+**package.json** (scripts opcionales):
 ```json
 {
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:api": "vitest run tests/api/",
-    "test:ui": "vitest run tests/ui/ --environment jsdom"
+    "test": "node --test tests/*.spec.js",
+    "test:api": "node --test tests/api-endpoints.spec.js",
+    "test:slow": "RUN_SLOW=1 node --test tests/slow.spec.js"
   }
 }
 ```
 
 ## 🎯 Principios
 
-1. **Realismo**: Tests usan código real de la app, no mocks
+1. **Realismo**: Tests usan código real de la app, no mocks innecesarios
 2. **Velocidad**: Categoría 1 debe ser rápida para feedback inmediato
-3. **Claridad**: Separación clara entre categorías
-4. **Mantenibilidad**: Tests simples y directos
-5. **Cobertura**: Validar flujos críticos en producción
+3. **Consolidación**: Suite unificada para API reduce redundancia
+4. **Claridad**: Separación clara entre categorías y responsabilidades
+5. **Mantenibilidad**: Tests simples, directos y auto-contenidos
+6. **Cobertura**: Validar flujos críticos en producción
 
 ---
 
-**Nota**: jsdom solo se usa para Categoría 3 (UI), NO para Categorías 1 y 2.
+**Nota**: La suite de API (`api-endpoints.spec.js`) inicia su propio servidor, eliminando dependencias externas.
+
