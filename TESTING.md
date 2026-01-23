@@ -101,6 +101,32 @@ npm run test:api
 npm run test
 ```
 
+## 🔄 Tests de Ciclo de Vida (Lentos)
+
+**Entorno**: Node.js con servicios reales instalados  
+**Objetivo**: Validar arranque, funcionamiento y detención de servicios (Apache, MySQL, MailPit, PostgreSQL)
+
+### Características
+- Requieren `RUN_SLOW=1` para ejecutarse
+- Usan binarios reales instalados en el sistema
+- Validan procesos del sistema operativo
+- Tests de integración con servicios externos
+- **Inteligentes**: Saltan automáticamente si un servicio no está instalado
+- Pueden tardar varios segundos por test
+
+### Servicios Soportados
+- **Apache** - Ciclo completo (detección → inicio → verificación → parada)
+- **Nginx** - Ciclo completo (detección → inicio → verificación → parada)
+- **MySQL** - Ciclo completo con inicialización de datos
+- **MailPit** - Ciclo completo (servicio simple)
+- **PostgreSQL** - Detección básica y verificación de binarios
+- **Composer** - Herramienta de gestión de dependencias PHP
+
+### Comportamiento Inteligente
+Los tests detectan automáticamente si un servicio está instalado:
+- ✅ **Si instalado**: Ejecuta tests completos de ciclo de vida
+- ⏭️ **Si no instalado**: Salta los tests sin fallar, mostrando mensaje informativo
+
 ## 🎨 Categoría 3: Tests de UI/Browser (Futuro)
 
 **Entorno**: jsdom, Playwright o Testing Library  
@@ -154,6 +180,18 @@ npm run test:slow
 
 # Tests de instalación
 npm run test:install
+
+# Tests de ciclo de vida (arranque/detención)
+npm run test:lifecycle
+
+# Tests de ciclo de vida específicos
+npm run test:lifecycle:mysql
+npm run test:lifecycle:mailpit
+npm run test:lifecycle:postgresql
+npm run test:lifecycle:nginx
+
+# Todos los tests de ciclo de vida
+npm run test:lifecycle:all
 ```
 
 ## 📊 Resumen
@@ -180,7 +218,13 @@ npm run test:install
     "test:api": "vitest run tests/api-endpoints.spec.js",
     "test:unit": "vitest run --exclude tests/api-endpoints.spec.js",
     "test:slow": "cross-env RUN_SLOW=1 vitest run tests/slow.spec.js",
-    "test:install": "cross-env RUN_SLOW=1 vitest run tests/slow.install.spec.js"
+    "test:install": "cross-env RUN_SLOW=1 vitest run tests/slow.install.spec.js",
+    "test:lifecycle": "cross-env RUN_SLOW=1 vitest run tests/apache-lifecycle.spec.js",
+    "test:lifecycle:mysql": "cross-env RUN_SLOW=1 vitest run tests/mysql-lifecycle.spec.js",
+    "test:lifecycle:mailpit": "cross-env RUN_SLOW=1 vitest run tests/mailpit-lifecycle.spec.js",
+    "test:lifecycle:postgresql": "cross-env RUN_SLOW=1 vitest run tests/postgresql-lifecycle.spec.js",
+    "test:lifecycle:nginx": "cross-env RUN_SLOW=1 vitest run tests/nginx-lifecycle.spec.js",
+    "test:lifecycle:all": "cross-env RUN_SLOW=1 vitest run tests/apache-lifecycle.spec.js tests/mysql-lifecycle.spec.js tests/mailpit-lifecycle.spec.js tests/postgresql-lifecycle.spec.js tests/nginx-lifecycle.spec.js"
   }
 }
 ```
@@ -197,4 +241,6 @@ npm run test:install
 ---
 
 **Nota**: La suite de API (`api-endpoints.spec.js`) inicia su propio servidor, eliminando dependencias externas.
+
+**Nota**: Los tests de ciclo de vida requieren servicios reales instalados y usan `RUN_SLOW=1` para ejecutarse, validando el arranque y detención completa de servicios como Apache, Nginx, MySQL, MailPit y PostgreSQL. Son inteligentes y saltan automáticamente si un servicio no está instalado.
 
