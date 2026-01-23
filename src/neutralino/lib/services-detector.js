@@ -85,6 +85,12 @@ export async function loadAppConfig(fsAdapter, appPath, log = () => {}) {
 }
 
 // Buscar ruta binaria de un servicio en un appPath concreto
+export async function loadServicesConfig(fsAdapter, appPath) {
+  const servicesPath = path.join(appPath, 'src', 'neutralino', 'services.json');
+  const content = await fsAdapter.readFile(servicesPath);
+  return JSON.parse(content);
+}
+
 export async function getServiceBinPath(fsAdapter, appPath, type, version, log = console.log) {
   if (!type || !version) return null;
 
@@ -492,6 +498,85 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
   // Filtrar servicios que no son ejecutables (librerías o lenguajes)
   const filteredServices = services.filter(service => service.type !== 'language');
   return filteredServices;
+}
+
+export async function getAllServicesAvailable({ fsAdapter, appPath, userConfig = {}, log = () => {} }) {
+  log('[ALLSERVICES] ===== GET ALL SERVICES AVAILABLE INICIO =====');
+
+  // Load services configuration
+  const servicesConfig = await loadServicesConfig(fsAdapter, appPath);
+  log('[ALLSERVICES] Services config loaded, services:', servicesConfig.services.length);
+
+  // Load app config
+  const appConfig = await loadAppConfig(fsAdapter, appPath, log);
+  log('[ALLSERVICES] App config loaded');
+
+  // Detect installed services
+  const installedServices = await detectServices({
+    fsAdapter,
+    appPath,
+    userConfig,
+    appConfig,
+    log
+  });
+  log('[ALLSERVICES] detectServices completed, installedServices:', installedServices.length);
+  
+  // Create a map of installed services by id
+  const installedMap = {};
+  installedServices.forEach(service => {
+    installedMap[service.id] = service;
+  });
+  
+  // Get available versions by type
+  const installedVersionsMap = {};
+  for (const service of servicesConfig.services) {
+    const serviceId = service.id;
+    if (!installedVersionsMap[serviceId]) {
+      const versions = await getAvailableVersions(fsAdapter, appPath, serviceId);
+      installedVersionsMap[serviceId] = versions;
+    }
+  }
+  
+  // Combine all services with their installation status
+  const allServices = servicesConfig.services.map(service => {
+    const installed = installedMap[service.id];
+    const installedVersions = installedVersionsMap[service.id] || [];
+    
+    // Get available versions for this service
+    const availableVersions = service.versions.map(v => ({
+      version: v.version,
+      url: v.url,
+      filename: v.filename,
+      installed: installedVersions.includes(v.version),
+      isCurrent: installed && installed.version === v.version
+    }));
+    
+    return {
+      id: service.id,
+      name: service.name,
+      type: service.type,
+      isLibrary: service.isLibrary || false,
+      port: service.port,
+      processName: service.processName,
+      installPath: service.installPath,
+      availableVersions,
+      currentVersion: installed ? installed.version : null,
+      installedVersion: installed ? installed.version : null,
+      installStatus: installed ? 'installed' : 'not-installed',
+      // Include additional fields from installed service
+      ...(installed ? {
+        configs: installed.configs,
+        phpVersion: installed.phpVersion,
+        availablePhpVersions: installed.availablePhpVersions,
+        specialCase: installed.specialCase,
+        requiresPhp: installed.requiresPhp,
+        dependenciesReady: installed.dependenciesReady
+      } : {})
+    };
+  });
+  
+  log('[ALLSERVICES] ===== GET ALL SERVICES AVAILABLE FIN =====');
+  return allServices;
 }
 
 export async function clearLogsFile(fsAdapter, targetPath) {
