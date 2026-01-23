@@ -287,6 +287,43 @@ describe('API REST - Dev Server Endpoints', { timeout: 30000 }, () => {
     });
   });
 
+  describe('GET /api/get-services', () => {
+    it('debe devolver lista de servicios detectados', async () => {
+      const response = await apiRequest('/api/get-services', { method: 'GET' });
+      
+      assert.strictEqual(response.status, 200, 'Status code debe ser 200');
+      assert.strictEqual(response.headers.get('content-type'), 'application/json', 'Content-Type debe ser JSON');
+      
+      const services = await response.json();
+      assert.ok(Array.isArray(services), 'Respuesta debe ser un array');
+      assert.ok(services.length > 0, 'Debe haber al menos un servicio');
+      
+      // Verificar estructura de al menos un servicio
+      const service = services[0];
+      assert.ok(service.id, 'Servicio debe tener id');
+      assert.ok(service.name, 'Servicio debe tener nombre');
+      assert.ok(service.type, 'Servicio debe tener tipo');
+    });
+  });
+
+  describe('POST /api/exec-command', () => {
+    it('debe ejecutar comandos del sistema', async () => {
+      const response = await apiRequest('/api/exec-command', {
+        method: 'POST',
+        body: JSON.stringify({ command: 'echo test' })
+      });
+      
+      assert.strictEqual(response.status, 200, 'Status code debe ser 200');
+      assert.strictEqual(response.headers.get('content-type'), 'application/json', 'Content-Type debe ser JSON');
+      
+      const result = await response.json();
+      assert.ok(result.stdout !== undefined, 'Debe tener stdout');
+      assert.ok(result.stderr !== undefined, 'Debe tener stderr');
+      assert.ok(typeof result.exitCode === 'number', 'Debe tener exitCode numérico');
+      assert.ok(result.stdout.includes('test'), 'Output debe contener "test"');
+    });
+  });
+
   describe('Endpoint inexistente', () => {
     it('debe devolver 404 para endpoint no definido', async () => {
       const response = await apiRequest('/api/endpoint-inexistente', {

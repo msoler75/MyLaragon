@@ -6,7 +6,7 @@ import { exec } from 'child_process';
 import { detectServices, loadAppConfig } from '../neutralino/lib/services-detector.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const basePath = path.resolve(__dirname, '../neutralino');
+const basePath = path.resolve(__dirname, '../../');
 
 console.log('[DEBUG] Starting server...');
 console.log('[DEBUG] basePath:', basePath);
@@ -251,7 +251,7 @@ const server = http.createServer((req, res) => {
         const { message } = JSON.parse(body);
         console.log('[REQUEST] Log message:', message);
         
-        const logPath = path.join(basePath, '..', 'app-debug.log');
+        const logPath = path.join(process.cwd(), 'app-debug.log');
         const timestamp = new Date().toISOString();
         const logLine = `[${timestamp}] ${message}\n`;
         
@@ -315,6 +315,7 @@ const server = http.createServer((req, res) => {
     
     (async () => {
       try {
+        // Always use real detectServices function, same as production
         const appConfig = await loadAppConfig(nodeAdapter, basePath);
         const services = await detectServices({
           fsAdapter: nodeAdapter,
@@ -323,7 +324,7 @@ const server = http.createServer((req, res) => {
           appConfig,
           log: console.log
         });
-        
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(services));
         console.log('[REQUEST] /api/get-services response sent');

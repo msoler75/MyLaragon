@@ -169,3 +169,13 @@ Durante el desarrollo, se identificó la necesidad de ejecutar el servidor de de
 - **Automatización Mejorada**: Los scripts npm y tareas VSCode permiten flujos de desarrollo más eficientes, con verificación automática del estado del servidor.
 - **Compatibilidad con Windows**: Las soluciones están optimizadas para el entorno Windows, resolviendo problemas comunes de ejecución de comandos en paralelo.
 - **Integración Continua**: Facilita la ejecución de pruebas de integración que requieren el servidor activo, mejorando la calidad y fiabilidad del desarrollo.
+
+
+## TESTS
+
+- api-endpoints.spec.js: Suite unificada que inicia su propio servidor y prueba todos los endpoints HTTP.
+- api-services.spec.js: Valida la estructura de services.json y su integración con el shim (no HTTP).
+- services.spec.js: Prueba la lógica de detección de servicios usando filesystem mocks.
+- php-detection.spec.js: Tests específicos para detección de versiones PHP.
+- fs-adapter.spec.js: Tests del adaptador de filesystem.
+- Otros: Tests de configuración Apache, logs, etc., cada uno enfocado en su dominio.

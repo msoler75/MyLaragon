@@ -50,23 +50,27 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
    - La definición de servicios instalables está en `services.json`.
    - La detección de binarios debe seguir el patrón de búsqueda en `bin/<tipo>/<versión>/<ejecutable>`.
 
-6- **Tests realistas**
+6. **Tests realistas**
    - Las pruebas unitarias deben de probar partes reales del sistema, no mocks maquillados.
    - Si los test se cumplen, la app se debe comportar igual en producción.
    - Los tests nunca NUNCA NUNCA JAMÁS deben hacer "trampas" para validarses (ej. mockear la existencia de binarios, respuestas falsas de ejecución de comandos).
    - Se deben escribir tantos test como hagan falta para cubrir los flujos críticos (instalación, detección, ejecución de comandos, logs).
 
-7- **Nunca supongas**
+7. **Nunca supongas**
    - Nunca digas 'Esto debería funcionar' o 'Esto ya debería estar bien'. Compruébalo. Para eso usa las herramientas de logging y testing.
    - Si algo no está claro, investiga o pregunta. No des nada por sentado.
    - Puedes investigar en app-debug.log para ver los mensajes de log generados en ejecuciones y así comprobar estado de la aplicación y sus funcionalidades.
 
-8- **Nunca molestes ni delegues**
+8. **Nunca molestes ni delegues**
    - Evita en lo posible molestar al usuario si tú puedes arreglártelas solo.
    - Nunca pidas al usuario que ejecute un comando o compruebe algo ¡si tú lo puedes hacer! 
    - Recuerda consultar los logs para verificar estado de la app.
    - Solo pide ayuda al usuario cuando no quede otro remedio.
 
+9. **Consistencia entre Dev y Prod**
+   - El comportamiento en modo desarrollo (dev-server + vite) debe ser idéntico al modo producción (Neutralino runtime).
+   - Si encuentras discrepancias, refactoriza para unificar la lógica en `lib/` y asegúrate de que ambos modos usen las mismas funciones.
+   - Minimizar la brecha entre dev y prod es crucial para evitar "works on my machine" bugs.
 
 ## Workflows Comunes
 - **Fix Duplication**: Ejecutar `node scripts/sync-resources.js`.
