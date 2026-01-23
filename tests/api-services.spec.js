@@ -3,7 +3,7 @@
  * funciona correctamente en el entorno de Neutralino
  */
 
-import { describe, it, before } from 'node:test';
+import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,7 @@ describe('API de servicios - Detección a través de services.json', () => {
   let servicesData;
   const servicesJsonPath = path.join(__dirname, '..', 'src', 'neutralino', 'services.json');
   
-  before(() => {
+  beforeAll(() => {
     // Verificar que services.json existe en el directorio src/neutralino
     if (!fs.existsSync(servicesJsonPath)) {
       throw new Error(`services.json no encontrado en: ${servicesJsonPath}`);
@@ -151,7 +151,7 @@ describe('Integración con neutralino-shim.js', () => {
   let shimContent;
   const shimPath = path.join(__dirname, '..', 'src', 'neutralino', 'neutralino-shim.js');
   
-  before(() => {
+  beforeAll(() => {
     if (fs.existsSync(shimPath)) {
       shimContent = fs.readFileSync(shimPath, 'utf-8');
     }

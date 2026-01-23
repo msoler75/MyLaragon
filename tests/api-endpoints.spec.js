@@ -3,7 +3,7 @@
  * Verifica que dev-server.js funciona correctamente
  */
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ async function apiRequest(endpoint, options = {}) {
 
 describe('API REST - Dev Server Endpoints', { timeout: 30000 }, () => {
   
-  before(async () => {
+  beforeAll(async () => {
     console.log('[TEST] Iniciando dev-server...');
     
     // Iniciar el servidor
@@ -68,7 +68,7 @@ describe('API REST - Dev Server Endpoints', { timeout: 30000 }, () => {
     console.log('[TEST] Servidor iniciado correctamente');
   });
 
-  after(async () => {
+  afterAll(async () => {
     if (serverProcess) {
       console.log('[TEST] Deteniendo servidor...');
       serverProcess.kill();

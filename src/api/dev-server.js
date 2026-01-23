@@ -42,7 +42,10 @@ const nodeAdapter = {
       console.log('[ADAPTER] readDir result:', result.length, 'items');
       return { entries: result };
     } catch (err) {
-      console.error('[ADAPTER] readDir error:', err);
+      // Don't log ENOENT errors as they are expected during service detection
+      if (err.code !== 'ENOENT') {
+        console.error('[ADAPTER] readDir error:', err);
+      }
       throw err;
     }
   },
@@ -66,7 +69,10 @@ const nodeAdapter = {
       console.log('[ADAPTER] readFile success:', content.length, 'bytes');
       return content;
     } catch (err) {
-      console.error('[ADAPTER] readFile error:', err);
+      // Don't log ENOENT errors as they are expected during file operations
+      if (err.code !== 'ENOENT') {
+        console.error('[ADAPTER] readFile error:', err);
+      }
       throw err;
     }
   },

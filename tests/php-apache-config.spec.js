@@ -1,4 +1,4 @@
-import { test, describe, before, after } from "node:test";
+import { test, describe, beforeAll, afterAll } from "vitest";
 import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
@@ -17,7 +17,7 @@ describe("Actualización de configuración de Apache al cambiar PHP", () => {
   let phpVersions = [];
   let fsAdapter;
   
-  before(async () => {
+  beforeAll(async () => {
     fsAdapter = createNodeFilesystemAdapter();
     // Verificar que Apache existe
     const apacheExists = fs.existsSync(apachePath);
@@ -61,7 +61,7 @@ describe("Actualización de configuración de Apache al cambiar PHP", () => {
     console.log(`[TEST] Versiones de PHP disponibles: ${phpVersions.join(", ")}`);
   });
   
-  after(() => {
+  afterAll(() => {
     // Restaurar contenido original de httpd.conf
     if (httpdConfPath && originalContent) {
       fs.writeFileSync(httpdConfPath, originalContent, "utf-8");

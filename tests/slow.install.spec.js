@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -108,7 +108,7 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
 
       // "Desinstalar": borrar la carpeta y re-chequear
       fs.rmSync(destDir, { recursive: true, force: true });
-      services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig: loadAppConfig(fsAdapter, tmpDir, noop), log: noop });
+      services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const apacheAfter = services.find(s => s.type === 'apache');
       assert.ok(apacheAfter);
       assert.equal(apacheAfter.isInstalled, false, 'apache debería estar no instalado tras borrar carpeta');
@@ -202,6 +202,8 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
   });
 
   it('instala una versión real de PHP descargada desde el servidor oficial y verifica que esté disponible', async () => {
+    const fsAdapter = createNodeFilesystemAdapter();
+    
     // Elegir una versión de PHP de services.json, por ejemplo 8.2.30 (NTS)
     const phpVersion = '8.2.30 (NTS)';
     const phpUrl = 'https://windows.php.net/downloads/releases/php-8.2.30-nts-Win32-vs16-x64.zip';
@@ -241,7 +243,6 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       // app.ini con Apache y PHP
       fs.writeFileSync(path.join(tmpDir, 'app.ini'), `[apache]\nversion=2.4.66\n[php]\nversion=${phpVersion}`);
 
-      const fsAdapter = createNodeFilesystemAdapter();
       const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
       const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const apache = services.find(s => s.type === 'apache');
@@ -256,6 +257,8 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
   });
 
   it('instala una versión real de Apache descargada desde el servidor oficial y verifica instalación/desinstalación', async () => {
+    const fsAdapter = createNodeFilesystemAdapter();
+    
     const apacheVersion = '2.4.66';
     const apacheUrl = 'https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.66-260107-Win64-VS18.zip';
     const downloadedZip = path.join(tmpDir, 'apache-real.zip');
@@ -275,7 +278,6 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       assert.ok(apacheBinPath, `Apache ${apacheVersion} no detectado tras instalación`);
       console.log(`[TEST] Apache binario encontrado en: ${apacheBinPath}`);
 
-      const fsAdapter = createNodeFilesystemAdapter();
       const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
       const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const apache = services.find(s => s.type === 'apache');
@@ -298,6 +300,8 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
   });
 
   it('instala una versión real de MySQL descargada desde el servidor oficial y verifica instalación/desinstalación', async () => {
+    const fsAdapter = createNodeFilesystemAdapter();
+    
     const mysqlVersion = '8.0.44';
     const mysqlUrl = 'https://dev.mysql.com/get/Downloads/MySQL-8.0/mysql-8.0.44-winx64.zip';
     const downloadedZip = path.join(tmpDir, 'mysql-real.zip');
@@ -317,7 +321,6 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       assert.ok(mysqlBinPath, `MySQL ${mysqlVersion} no detectado tras instalación`);
       console.log(`[TEST] MySQL binario encontrado en: ${mysqlBinPath}`);
 
-      const fsAdapter = createNodeFilesystemAdapter();
       const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
       const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const mysql = services.find(s => s.type === 'mysql');
@@ -340,6 +343,8 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
   });
 
   it('instala una versión real de MailPit descargada desde el servidor oficial y verifica instalación/desinstalación', async () => {
+    const fsAdapter = createNodeFilesystemAdapter();
+    
     const mailpitVersion = '1.20.4';
     const mailpitUrl = 'https://github.com/axllent/mailpit/releases/download/v1.20.4/mailpit-windows-amd64.zip';
     const downloadedZip = path.join(tmpDir, 'mailpit-real.zip');
@@ -359,7 +364,6 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
       assert.ok(mailpitBinPath, `MailPit ${mailpitVersion} no detectado tras instalación`);
       console.log(`[TEST] MailPit binario encontrado en: ${mailpitBinPath}`);
 
-      const fsAdapter = createNodeFilesystemAdapter();
       const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
       const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig: { projectsPath: path.join(tmpDir, 'www') }, appConfig, log: noop });
       const mailpit = services.find(s => s.type === 'mailpit');

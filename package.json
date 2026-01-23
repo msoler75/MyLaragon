@@ -16,7 +16,13 @@
     "clean:links": "node scripts/sync-resources.js remove",
     "prebuild": "node scripts/sync-resources.js check",
     "dist": "node scripts/build-config.js build && npm run build && cd neutralino && npx @neutralinojs/neu build && cd .. && node scripts/build-config.js restore",
-    "test:configs": "node scripts/auto_test_configs.js"
+    "test:configs": "node scripts/auto_test_configs.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:api": "vitest run tests/api-endpoints.spec.js",
+    "test:unit": "vitest run --exclude tests/api-endpoints.spec.js",
+    "test:slow": "cross-env RUN_SLOW=1 vitest run tests/slow.spec.js",
+    "test:install": "cross-env RUN_SLOW=1 vitest run tests/slow.install.spec.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
@@ -35,6 +41,7 @@
     "@types/react-dom": "^19.2.3",
     "concurrently": "^9.2.1",
     "cors": "^2.8.5",
+    "cross-env": "^10.1.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

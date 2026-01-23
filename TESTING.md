@@ -25,11 +25,14 @@ tests/
 
 ### Ejemplo
 ```javascript
+import { describe, it } from 'vitest';
 import { getAvailableVersions } from '../src/lib/services-detector.js';
 
-test('Debe detectar versiones de PHP', () => {
-  const versions = getAvailableVersions('/path', 'php');
-  assert.ok(versions.length > 0);
+describe('Detección de servicios', () => {
+  it('Debe detectar versiones de PHP', () => {
+    const versions = getAvailableVersions('/path', 'php');
+    assert.ok(versions.length > 0);
+  });
 });
 ```
 
@@ -92,10 +95,10 @@ describe('API REST - Dev Server Endpoints', () => {
 ### Setup
 ```bash
 # Ejecutar suite completa (inicia servidor automáticamente)
-node --test tests/api-endpoints.spec.js
+npm run test:api
 
 # O ejecutar todos los tests
-node --test tests/*.spec.js
+npm run test
 ```
 
 ## 🎨 Categoría 3: Tests de UI/Browser (Futuro)
@@ -135,22 +138,22 @@ export default defineConfig({
 
 ```bash
 # Todos los tests (Categoría 1 + API unificada)
-node --test tests/*.spec.js
+npm run test
 
 # Tests de funciones locales (Categoría 1)
-node --test tests/*.spec.js --grep "no api"
+npm run test:unit
 
 # Suite de API completa (Categoría 2)
-node --test tests/api-endpoints.spec.js
+npm run test:api
 
 # Test específico
-node --test tests/php-detection.spec.js
+npx vitest run tests/php-detection.spec.js
 
 # Tests lentos (instalación real)
-RUN_SLOW=1 node --test tests/slow.spec.js
+npm run test:slow
 
 # Tests de instalación
-RUN_SLOW=1 node --test tests/slow.install.spec.js
+npm run test:install
 ```
 
 ## 📊 Resumen
@@ -163,16 +166,21 @@ RUN_SLOW=1 node --test tests/slow.install.spec.js
 
 ## ⚙️ Configuración
 
-**Entorno**: Node.js 18+ con test runner integrado  
-**Framework**: `node --test` (sin vitest para simplicidad)
+**Entorno**: Node.js 18+ con Vitest  
+**Framework**: Vitest (para mejor experiencia de desarrollo y características avanzadas)
 
-**package.json** (scripts opcionales):
+**Nota**: Vitest está instalado como dependencia local del proyecto. Usa `npm run test` para ejecutar los tests, o `npx vitest` para comandos directos.
+
+**package.json** (scripts disponibles):
 ```json
 {
   "scripts": {
-    "test": "node --test tests/*.spec.js",
-    "test:api": "node --test tests/api-endpoints.spec.js",
-    "test:slow": "RUN_SLOW=1 node --test tests/slow.spec.js"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:api": "vitest run tests/api-endpoints.spec.js",
+    "test:unit": "vitest run --exclude tests/api-endpoints.spec.js",
+    "test:slow": "cross-env RUN_SLOW=1 vitest run tests/slow.spec.js",
+    "test:install": "cross-env RUN_SLOW=1 vitest run tests/slow.install.spec.js"
   }
 }
 ```

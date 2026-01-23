@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -62,7 +62,7 @@ describeLifecycle('Ciclo de Vida de Apache', () => {
         return null;
     }
 
-    before(async () => {
+    beforeAll(async () => {
         const root = process.cwd();
         apachePath = findApache(root);
         console.log('   [TEST] Apache encontrado en:', apachePath);
@@ -90,7 +90,7 @@ describeLifecycle('Ciclo de Vida de Apache', () => {
         } catch (e) {}
     });
 
-    after(() => {
+    afterAll(() => {
         // Limpieza final
         try {
             execSync('taskkill /F /IM httpd.exe /T 2>NUL', { stdio: 'ignore' });

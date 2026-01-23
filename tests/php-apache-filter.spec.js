@@ -1,4 +1,4 @@
-import { test, describe } from "node:test";
+import { test, describe } from 'vitest';
 import assert from "node:assert";
 import { detectServices, getAvailableVersions } from "../src/neutralino/lib/services-detector.js";
 import { createNodeFilesystemAdapter } from "../src/neutralino/lib/fs-adapter.js";
