@@ -489,7 +489,9 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
   }
 
   log(`[DETECTOR] ===== DETECT SERVICES FIN: ${services.length} servicios =====`);
-  return services;
+  // Filtrar servicios que no son ejecutables (librerías o lenguajes)
+  const filteredServices = services.filter(service => service.type !== 'language');
+  return filteredServices;
 }
 
 export async function clearLogsFile(fsAdapter, targetPath) {

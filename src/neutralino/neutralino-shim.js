@@ -303,24 +303,27 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
 
     servicesPromise = (async () => {
       // 1. Intentar via fetch (ideal para desarrollo y si el server de Neutralino responde)
-      const fetchPaths = ['/services.json', 'services.json', './services.json', '/www/services.json'];
-      for (const path of fetchPaths) {
-        try {
-          console.log(`[SHIM] Intentando fetch servicios desde: ${path}`);
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 1000);
-          const res = await fetch(path, { cache: 'no-store', signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (res.ok) {
-            const data = await res.json();
-            const list = Array.isArray(data) ? data : (data && Array.isArray(data.services) ? data.services : []);
-            if (list.length > 0) {
-              console.log(`[SHIM] Servicios cargados via fetch desde ${path}`);
-              cachedServices = list;
-              return list;
-            }
+      // En modo dev, el API server está en localhost:5174
+      const isDev = window.location.hostname === 'localhost' && window.location.port === '5173';
+      const servicePath = isDev ? 'http://localhost:5174/services.json' : '/services.json';
+      
+      try {
+        console.log(`[SHIM] Intentando cargar services.json desde: ${servicePath}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(servicePath, { cache: 'no-store', signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data && Array.isArray(data.services) ? data.services : []);
+          if (list.length > 0) {
+            console.log(`[SHIM] Servicios cargados exitosamente desde ${servicePath}`);
+            cachedServices = list;
+            return list;
           }
-        } catch (e) {}
+        }
+      } catch (e) {
+        console.warn(`[SHIM] Error cargando services.json desde ${servicePath}:`, e.message);
       }
 
       // 2. Fallback: Intentar viafilesystem (En producción)
@@ -886,9 +889,9 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
       return { stdout: '', stderr: 'No command' };
     }
     try{
-      // En desarrollo (puerto 5173), usar siempre /api/exec
+      // En desarrollo (puerto 5173), usar siempre /api/exec-command
       if (checkIsDev()) {
-        const response = await fetch('/api/exec', {
+        const response = await fetch('/api/exec-command', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command: cmd })
@@ -1037,7 +1040,7 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
         }
         console.log('[SHIM] Servicio encontrado:', service);
         
-        const type = (service.type || service.id || service.name || '').toLowerCase();
+        const type = (service.id || service.type || service.name || '').toLowerCase();
         const version = service.version || '';
         console.log('[SHIM] Tipo:', type, '| Versión:', version || '(default)');
         
@@ -1046,7 +1049,6 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
           'nginx': 'nginx.exe',
           'mysql': 'mysqld.exe',
           'mariadb': 'mysqld.exe',
-          'redis': 'redis-server.exe',
           'memcached': 'memcached.exe',
           'mailpit': 'mailpit.exe',
           'mongodb': 'mongod.exe',
@@ -1134,7 +1136,8 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
             break;
           }
           case 'nginx':{
-            startCmd = `start /B "" "${fullExe}"`;
+            const exeDir = normalizedExe.substring(0, normalizedExe.lastIndexOf('\\'));
+            startCmd = `start /B "" "${fullExe}" -p "${exeDir}"`;
             break;
           }
           case 'mysql':
@@ -1142,9 +1145,8 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
             startCmd = `start /B "" "${fullExe}" --standalone`;
             break;
           }
-          case 'redis':{
-            const redisConf = `${basePath}\\\\bin\\\\redis\\\\${version}\\\\redis.conf`;
-            startCmd = `start /B "" "${fullExe}" "${redisConf}"`;
+          case 'mailpit':{
+            startCmd = `start /B "" "${fullExe}" --smtp=0.0.0.0:1025 --http=0.0.0.0:8025`;
             break;
           }
           case 'mongodb':{
@@ -1210,7 +1212,7 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
           throw new Error(`Servicio no encontrado: ${serviceName}`);
         }
         
-        const type = (service.type || service.id || service.name || '').toLowerCase();
+        const type = (service.id || service.type || service.name || '').toLowerCase();
         const version = service.version || '';
         
         const exeMap = {
@@ -1409,7 +1411,8 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
     },
     getRemoteServices: async () => {
       console.log('[SHIM] getRemoteServices iniciando...');
-      const services = await loadServicesConfig();
+      const allServices = await loadServicesConfig();
+      const services = allServices.filter(s => !s.isLibrary && s.type !== 'language');
       if (services.length > 0) {
         return { services };
       }
@@ -1417,7 +1420,6 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
       // Fallback si falla todo
       return { 
         services: [
-          { "id": "php", "name": "PHP", "versions": [] },
           { "id": "apache", "name": "Apache", "versions": [] }
         ]
       };
@@ -1463,9 +1465,9 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
 
         // Limpiar solo caracteres verdaderamente Prohibidos en Windows: < > : " / \ | ? *
         const cleanVersion = service.version.replace(/[<>:"\/\\|?*]/g, '_').trim();
-        const destDir = `${basePath}\\neutralino\\bin\\${service.type}\\${cleanVersion}`.replace(/\\\\/g, '\\');
+        const destDir = `${basePath}\\neutralino\\bin\\${service.id}\\${cleanVersion}`.replace(/\\\\/g, '\\');
         const tmpDir = `${basePath}\\tmp`.replace(/\\\\/g, '\\');
-        const tmpZipPath = `${tmpDir}\\${service.type}-${cleanVersion}.zip`.replace(/\\\\/g, '\\').replace(/\s+/g, '_');
+        const tmpZipPath = `${tmpDir}\\${service.id}-${cleanVersion}.zip`.replace(/\\\\/g, '\\').replace(/\s+/g, '_');
 
         console.log(`[SHIM] Instalando: ${service.name} v${service.version}`);
         console.log(`[SHIM] BasePath resuelto: ${basePath}`);

@@ -17,6 +17,8 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
       if (window.webservAPI && typeof window.webservAPI.getRemoteServices === 'function') {
         try {
           const data = await window.webservAPI.getRemoteServices();
+          console.log('[INSTALLER] getRemoteServices returned:', data);
+          console.log('[INSTALLER] Setting remoteServices to:', data.services || []);
           setRemoteServices(data.services || []);
         } catch (e) {
           console.error("Error fetching remote services:", e);
@@ -26,6 +28,14 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
     };
     fetchServices();
   }, [hasFetched]); // Solo depende de hasFetched
+
+  // Debug logs para rendering
+  useEffect(() => {
+    console.log('[INSTALLER] Rendering with remoteServices:', remoteServices);
+    remoteServices.forEach(service => {
+      console.log('[INSTALLER] Rendering service:', service.id, 'with versions:', service.versions);
+    });
+  }, [remoteServices]);
 
   const handleInstall = async (service, versionInfo) => {
     const taskId = `${service.id}-${versionInfo.version}`;
@@ -119,7 +129,8 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {remoteServices.map(service => (
+        {remoteServices.map(service => {
+          return (
           <div key={service.id} className="bg-app-surface rounded-3xl p-6 border border-app-border shadow-sm hover:shadow-xl hover:border-app-primary/30 transition-all duration-500 overflow-hidden relative group">
             <div className="flex items-center space-x-4 mb-6 relative z-10">
               <div className="bg-app-primary/10 p-4 rounded-2xl border border-app-primary/20 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500">
@@ -227,7 +238,8 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
             {/* Elemento decorativo de fondo */}
             <Layers className="absolute -right-6 -bottom-6 text-app-primary opacity-[0.03] w-32 h-32 -rotate-12 transition-all duration-700 group-hover:scale-125 group-hover:opacity-[0.07]" />
           </div>
-        ))}
+        );
+        })}
         {remoteServices.length === 0 && (
           <div className="col-span-full py-16 flex flex-col items-center justify-center bg-app-bg/30 rounded-3xl border border-app-border">
             <Server size={32} className="text-app-text-muted mb-4 opacity-30" />

@@ -350,7 +350,7 @@ const server = http.createServer((req, res) => {
     
     (async () => {
       try {
-        const servicesPath = path.join(basePath, 'services.json');
+        const servicesPath = path.join(basePath, 'neutralino', 'www', 'services.json');
         const content = await nodeAdapter.readFile(servicesPath);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
