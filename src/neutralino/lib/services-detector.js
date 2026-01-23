@@ -351,20 +351,23 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
       }
     }
 
-    services.push({
-      id: 'apache',
-      name: 'Apache',
-      type: 'apache',
-      version: apacheVersion,
-      phpVersion: phpVersion,
-      configs: filteredConfigs,
-      availableVersions: availableApache,
-      availablePhpVersions: availablePhp,
-      isInstalled: binPath !== null,
-      requiresPhp: true,
-      dependenciesReady: binPath !== null && !!phpBinPath,
-      port: getPortFromConfig('apache', 80)
-    });
+    if (binPath !== null && phpBinPath !== null) {
+      services.push({
+        id: 'apache',
+        name: 'Apache',
+        type: 'apache',
+        version: apacheVersion,
+        phpVersion: phpVersion,
+        configs: filteredConfigs,
+        availableVersions: availableApache,
+        availablePhpVersions: availablePhp,
+        isInstalled: true,
+        specialCase: true,
+        requiresPhp: true,
+        dependenciesReady: true,
+        port: getPortFromConfig('apache', 80)
+      });
+    }
   }
 
   if (phpVersion) {
@@ -562,7 +565,7 @@ export async function getAllServicesAvailable({ fsAdapter, appPath, userConfig =
       availableVersions,
       currentVersion: installed ? installed.version : null,
       installedVersion: installed ? installed.version : null,
-      installStatus: installed ? 'installed' : 'not-installed',
+      installStatus: !!installed,
       // Include additional fields from installed service
       ...(installed ? {
         configs: installed.configs,
