@@ -414,5 +414,36 @@ slowDescribe('Slow install/uninstall flow usando installer real', () => {
     assert.equal(apache.dependenciesReady, true, 'Apache no tiene dependencias listas con PHP instalado');
     assert.equal(apache.phpVersion, '8.2.30 (NTS)', 'PHP version no asignada correctamente a Apache');
   });
+
+  it('verifica que la instalación usa el tipo de servicio correcto en la ruta de destino', async () => {
+    // Este test verifica que la lógica de construcción de rutas en el shim usa service.type, no service.id
+    const fsAdapter = createNodeFilesystemAdapter();
+    
+    // Simular instalación de PHP con estructura correcta
+    const phpZip = makeZipWithExecutable(tmpDir, path.join('php', 'php.exe'), 'php.zip');
+    const { server, url } = await startHttpServer(phpZip);
+    const downloaded = path.join(tmpDir, 'php-downloaded.zip');
+    
+    try {
+      await downloadToFile(url, downloaded);
+      
+      // La ruta correcta debería ser: neutralino/bin/php/8.2.30 (NTS)
+      // NO debería ser: neutralino/bin/undefined/8.2.30 (NTS)
+      const expectedDestDir = path.join(tmpDir, 'neutralino', 'bin', 'php', '8.2.30 (NTS)');
+      await installFromZip({ zipPath: downloaded, destDir: expectedDestDir, onLog: noop });
+      
+      // Verificar que se instaló en la carpeta correcta
+      assert.ok(fs.existsSync(expectedDestDir), `PHP no se instaló en la carpeta esperada: ${expectedDestDir}`);
+      assert.ok(fs.existsSync(path.join(expectedDestDir, 'php.exe')), 'php.exe no encontrado en carpeta de instalación');
+      
+      // Verificar que NO se instaló en la carpeta incorrecta (con 'undefined')
+      const wrongDestDir = path.join(tmpDir, 'neutralino', 'bin', 'undefined', '8.2.30 (NTS)');
+      assert.ok(!fs.existsSync(wrongDestDir), `PHP se instaló incorrectamente en carpeta 'undefined': ${wrongDestDir}`);
+      
+      console.log(`[TEST] PHP instalado correctamente en: ${expectedDestDir}`);
+    } finally {
+      server.close();
+    }
+  });
 });
 

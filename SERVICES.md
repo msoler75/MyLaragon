@@ -154,9 +154,9 @@ return files.some(f => moduleRegex.test(f));
 
 **Archivo:** `src/neutralino/neutralino-shim.js` (mismo cambio)
 
-#### 3. Actualizar services.json
+#### 3. Actualizar configuración de servicios
 
-**Archivo:** `src/neutralino/services.json`
+**Archivo:** `src/neutralino/lib/services-detector.js` (constante SERVICES_CONFIG)
 
 Añadir nueva versión:
 
@@ -208,9 +208,9 @@ test("Debe soportar Apache 2.4 y 2.5", () => {
 
 NGINX tiene retrocompatibilidad estable. Los cambios requeridos son mínimos:
 
-#### 1. Actualizar services.json
+#### 1. Actualizar configuración de servicios
 
-**Archivo:** `src/neutralino/services.json`
+**Archivo:** `src/neutralino/lib/services-detector.js` (constante SERVICES_CONFIG)
 
 ```json
 {
@@ -274,9 +274,9 @@ Descargar versión TS de PHP y verificar:
 - ✅ Existe `php*apache2_4.dll` (o `php*apache2_5.dll`)
 - ✅ Versión de Visual C++ compatible con Apache
 
-#### 2. Actualizar services.json
+#### 2. Actualizar configuración de servicios
 
-**Archivo:** `src/neutralino/services.json`
+**Archivo:** `src/neutralino/lib/services-detector.js` (constante SERVICES_CONFIG)
 
 ```json
 {

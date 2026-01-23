@@ -287,24 +287,7 @@ describe('API REST - Dev Server Endpoints', { timeout: 30000 }, () => {
     });
   });
 
-  describe('GET /api/get-services', () => {
-    it('debe devolver lista de servicios detectados', async () => {
-      const response = await apiRequest('/api/get-services', { method: 'GET' });
-      
-      assert.strictEqual(response.status, 200, 'Status code debe ser 200');
-      assert.strictEqual(response.headers.get('content-type'), 'application/json', 'Content-Type debe ser JSON');
-      
-      const services = await response.json();
-      assert.ok(Array.isArray(services), 'Respuesta debe ser un array');
-      assert.ok(services.length > 0, 'Debe haber al menos un servicio');
-      
-      // Verificar estructura de al menos un servicio
-      const service = services[0];
-      assert.ok(service.id, 'Servicio debe tener id');
-      assert.ok(service.name, 'Servicio debe tener nombre');
-      assert.ok(service.type, 'Servicio debe tener tipo');
-    });
-  });
+ 
 
   describe('POST /api/exec-command', () => {
     it('debe ejecutar comandos del sistema', async () => {
@@ -321,6 +304,68 @@ describe('API REST - Dev Server Endpoints', { timeout: 30000 }, () => {
       assert.ok(result.stderr !== undefined, 'Debe tener stderr');
       assert.ok(typeof result.exitCode === 'number', 'Debe tener exitCode numérico');
       assert.ok(result.stdout.includes('test'), 'Output debe contener "test"');
+    });
+  });
+
+  describe('GET /api/get-services', () => {
+    it('debe devolver información completa de servicios para vistas', async () => {
+      const response = await apiRequest('/api/get-services', { method: 'GET' });
+      
+      assert.strictEqual(response.status, 200, 'Status code debe ser 200');
+      assert.strictEqual(response.headers.get('content-type'), 'application/json', 'Content-Type debe ser JSON');
+      
+      const data = await response.json();
+      assert.ok(data.all, 'Debe devolver propiedad "all"');
+      assert.ok(data.installer, 'Debe devolver propiedad "installer"');
+      assert.ok(data.services, 'Debe devolver propiedad "services"');
+      
+      assert.ok(Array.isArray(data.all), 'all debe ser un array');
+      assert.ok(Array.isArray(data.installer), 'installer debe ser un array');
+      assert.ok(Array.isArray(data.services), 'services debe ser un array');
+      
+      // Verificar que hay servicios
+      assert.ok(data.all.length > 0, 'Debe haber al menos un servicio en all');
+      
+      // Verificar estructura de un servicio en all
+      const service = data.all[0];
+      assert.ok(service.id, 'Servicio debe tener id');
+      assert.ok(service.name, 'Servicio debe tener nombre');
+      assert.ok(service.type, 'Servicio debe tener tipo');
+      assert.ok(service.hasOwnProperty('isLibrary'), 'Servicio debe tener isLibrary');
+      assert.ok(service.availableVersions, 'Servicio debe tener availableVersions');
+      assert.ok(Array.isArray(service.availableVersions), 'availableVersions debe ser array');
+      assert.ok(service.hasOwnProperty('installedVersion'), 'Servicio debe tener installedVersion');
+      assert.ok(service.hasOwnProperty('status'), 'Servicio debe tener status');
+      assert.ok(service.hasOwnProperty('running'), 'Servicio debe tener running');
+      assert.ok(service.hasOwnProperty('canStart'), 'Servicio debe tener canStart');
+      assert.ok(service.hasOwnProperty('canStop'), 'Servicio debe tener canStop');
+      
+      // Verificar que installer no incluye servicios de tipo language
+      const languageServicesInInstaller = data.installer.filter(s => s.type === 'language');
+      assert.strictEqual(languageServicesInInstaller.length, 0, 'installer no debe incluir servicios de tipo language');
+      
+      // Verificar que services no incluye servicios de tipo language y solo instalados
+      const languageServicesInServices = data.services.filter(s => s.type === 'language');
+      assert.strictEqual(languageServicesInServices.length, 0, 'services no debe incluir servicios de tipo language');
+      
+      const notInstalledServices = data.services.filter(s => !s.installedVersion);
+      assert.strictEqual(notInstalledServices.length, 0, 'services solo debe incluir servicios instalados');
+    });
+    
+    it('debe incluir versiones disponibles con información correcta', async () => {
+      const response = await apiRequest('/api/get-services', { method: 'GET' });
+      const data = await response.json();
+      
+      // Encontrar un servicio que tenga versiones disponibles
+      const serviceWithVersions = data.all.find(s => s.availableVersions && s.availableVersions.length > 0);
+      if (serviceWithVersions) {
+        const version = serviceWithVersions.availableVersions[0];
+        assert.ok(version.version, 'Versión debe tener propiedad version');
+        assert.ok(version.url, 'Versión debe tener propiedad url');
+        assert.ok(version.filename, 'Versión debe tener propiedad filename');
+        assert.ok(version.hasOwnProperty('installed'), 'Versión debe tener propiedad installed');
+        assert.ok(version.hasOwnProperty('isCurrent'), 'Versión debe tener propiedad isCurrent');
+      }
     });
   });
 

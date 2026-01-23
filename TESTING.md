@@ -41,7 +41,7 @@ describe('Detección de servicios', () => {
 - `php-detection.spec.js` - Detección de versiones PHP
 - `php-apache-config.spec.js` - Actualización de httpd.conf
 - `php-apache-filter.spec.js` - Filtrado de PHP por módulo Apache
-- `api-services.spec.js` - Validación de services.json
+- `api-services.spec.js` - Validación de la configuración de servicios en services-detector
 - `debug-neutralino.spec.js` - Integración con Neutralino
 - `log-parity.spec.js` - Sistema de logs
 - `slow.spec.js` - Tests lentos con binarios reales
@@ -83,7 +83,7 @@ describe('API REST - Dev Server Endpoints', () => {
 - `POST /api/file-exists` - Verificar existencia de archivos
 - `POST /api/read-file` - Leer contenido de archivos
 - `POST /api/write-log` - Escribir en logs
-- `GET /api/get-services` - Lista de servicios detectados
+- `GET /api/api/get-services` - Lista de servicios detectados
 - `POST /api/exec-command` - Ejecutar comandos del sistema
 - `404` - Endpoints inexistentes
 - `CORS` - Headers y preflight requests

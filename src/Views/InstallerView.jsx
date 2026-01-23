@@ -2,40 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { RefreshCw, Server, Trash2, X, Layers } from 'lucide-react';
 
 function InstallerView({ t, onInstalled, services = [], activeTab }) {
-  const [remoteServices, setRemoteServices] = useState([]);
-  const [loadingRepo, setLoadingRepo] = useState(true);
   const [activeTasks, setActiveTasks] = useState({}); // { 'id-version': 'installing' | 'uninstalling' }
-  const [hasFetched, setHasFetched] = useState(false);
-
-  useEffect(() => {
-    const fetchServices = async () => {
-      // Si ya hemos intentado cargar, no repetimos
-      if (hasFetched) return;
-      
-      setHasFetched(true);
-      setLoadingRepo(true);
-      if (window.webservAPI && typeof window.webservAPI.getRemoteServices === 'function') {
-        try {
-          const data = await window.webservAPI.getRemoteServices();
-          console.log('[INSTALLER] getRemoteServices returned:', data);
-          console.log('[INSTALLER] Setting remoteServices to:', data.services || []);
-          setRemoteServices(data.services || []);
-        } catch (e) {
-          console.error("Error fetching remote services:", e);
-        }
-      }
-      setLoadingRepo(false);
-    };
-    fetchServices();
-  }, [hasFetched]); // Solo depende de hasFetched
 
   // Debug logs para rendering
   useEffect(() => {
-    console.log('[INSTALLER] Rendering with remoteServices:', remoteServices);
-    remoteServices.forEach(service => {
-      console.log('[INSTALLER] Rendering service:', service.id, 'with versions:', service.versions);
+    console.log('[INSTALLER] Rendering with services:', services);
+    services.forEach(service => {
+      console.log('[INSTALLER] Rendering service:', service.id, 'with availableVersions:', service.availableVersions);
     });
-  }, [remoteServices]);
+  }, [services]);
 
   const handleInstall = async (service, versionInfo) => {
     const taskId = `${service.id}-${versionInfo.version}`;
@@ -117,11 +92,11 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
     }
   };
 
-  if (loadingRepo) {
+  if (!services || services.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-app-text-muted opacity-50 space-y-4">
-        <RefreshCw size={48} strokeWidth={1} className="animate-spin" />
-        <p className="font-black uppercase tracking-widest text-[10px]">Cargando repositorio de servicios...</p>
+        <Server size={48} strokeWidth={1} />
+        <p className="font-black uppercase tracking-widest text-[10px]">No hay servicios disponibles</p>
       </div>
     );
   }
@@ -129,7 +104,7 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {remoteServices.map(service => {
+        {services.map(service => {
           return (
           <div key={service.id} className="bg-app-surface rounded-3xl p-6 border border-app-border shadow-sm hover:shadow-xl hover:border-app-primary/30 transition-all duration-500 overflow-hidden relative group">
             <div className="flex items-center space-x-4 mb-6 relative z-10">
@@ -146,18 +121,10 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
             </div>
             
             <div className="space-y-2 relative z-10">
-              {service.versions.map(v => {
+              {service.availableVersions && service.availableVersions.map(v => {
                 const taskId = `${service.id}-${v.version}`;
                 const taskStatus = activeTasks[taskId];
-                const isInstalled = services.some(s => {
-                  const sType = (s.type || s.id || '').toLowerCase();
-                  const typeMatch = sType === service.id.toLowerCase() || 
-                                   s.name?.toLowerCase() === service.id.toLowerCase();
-                  
-                  // Verificar si esta versión específica está en la lista de versiones instaladas detectadas
-                  const versionsDetected = s.availableVersions || s.availablePhpVersions || [];
-                  return typeMatch && versionsDetected.includes(v.version);
-                });
+                const isInstalled = v.installed;
 
                 return (
                   <div key={v.version} className="flex items-center justify-between p-3.5 bg-app-bg/40 rounded-2xl border border-app-border group/item hover:bg-app-primary/5 hover:border-app-primary/40 transition-all duration-300">
@@ -240,7 +207,7 @@ function InstallerView({ t, onInstalled, services = [], activeTab }) {
           </div>
         );
         })}
-        {remoteServices.length === 0 && (
+        {services.length === 0 && (
           <div className="col-span-full py-16 flex flex-col items-center justify-center bg-app-bg/30 rounded-3xl border border-app-border">
             <Server size={32} className="text-app-text-muted mb-4 opacity-30" />
             <p className="text-xs font-bold text-app-text-muted uppercase tracking-widest truncate">{t.noServicesDetected}</p>

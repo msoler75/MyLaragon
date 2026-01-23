@@ -1,6 +1,6 @@
 // WebServDev API Shim - Unified API for Neutralino
 import { createFilesystemAdapter } from './lib/fs-adapter.js';
-import { detectServices, loadAppConfig, getAvailableVersions } from './lib/services-detector.js';
+import { getAvailableVersions, getAllServicesAvailable } from './lib/services-detector.js';
 
 (function(){
   // --- SISTEMA DE LOGS PERSISTENTES (CAPA TEMPRANA) ---
@@ -302,56 +302,42 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
     if (servicesPromise) return servicesPromise;
 
     servicesPromise = (async () => {
-      // 1. Intentar via fetch (ideal para desarrollo y si el server de Neutralino responde)
-      // En modo dev, el API server está en localhost:5174
-      const isDev = window.location.hostname === 'localhost' && window.location.port === '5173';
-      const servicePath = isDev ? 'http://localhost:5174/services.json' : '/services.json';
-      
       try {
-        console.log(`[SHIM] Intentando cargar services.json desde: ${servicePath}`);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const res = await fetch(servicePath, { cache: 'no-store', signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          const data = await res.json();
-          const list = Array.isArray(data) ? data : (data && Array.isArray(data.services) ? data.services : []);
-          if (list.length > 0) {
-            console.log(`[SHIM] Servicios cargados exitosamente desde ${servicePath}`);
-            cachedServices = list;
-            return list;
+        console.log(`[SHIM] Cargando servicios usando services-detector`);
+        const fsAdapter = createFilesystemAdapter();
+        const cfgRaw = localStorage.getItem('WebServDev-config');
+        const userConfig = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
+        let basePath = userConfig.basePath || defaultConfig.basePath || appRoot;
+
+        // Resolver ruta absoluta
+        if (basePath === '.' || basePath === './' || !basePath.includes(':')) {
+          try {
+            const res = await execCommand('cd');
+            if (res && res.stdout) {
+              basePath = res.stdout.trim();
+              console.log('[SHIM] Resolviendo basePath a absoluto:', basePath);
+            }
+          } catch(e) {
+            console.warn('[SHIM] No se pudo resolver ruta absoluta:', e.message);
           }
         }
-      } catch (e) {
-        console.warn(`[SHIM] Error cargando services.json desde ${servicePath}:`, e.message);
-      }
 
-      // 2. Fallback: Intentar viafilesystem (En producción)
-      if (globalThis.Neutralino && globalThis.Neutralino.filesystem) {
-        const fsPaths = [
-          (globalThis.NL_PATH || '.') + '/services.json',
-          './services.json',
-          'services.json'
-        ];
-        for (const p of fsPaths) {
-          try {
-            const normalized = p.replace(/\\/g, '/');
-            console.log(`[SHIM] Intentando leer servicios via FS: ${normalized}`);
-            const content = await globalThis.Neutralino.filesystem.readFile(normalized);
-            if (content) {
-              const data = JSON.parse(content);
-              const list = Array.isArray(data) ? data : (data && Array.isArray(data.services) ? data.services : []);
-              if (list.length > 0) {
-                console.log(`[SHIM] Servicios cargados via FS desde ${normalized}`);
-                cachedServices = list;
-                return list;
-              }
-            }
-          } catch (e) {}
+        const list = await getAllServicesAvailable({
+          fsAdapter,
+          appPath: basePath,
+          userConfig,
+          log: console.log
+        });
+        if (list.length > 0) {
+          console.log(`[SHIM] Servicios cargados exitosamente desde services-detector`);
+          cachedServices = list;
+          return list;
         }
+      } catch (e) {
+        console.warn('[SHIM] Error cargando servicios desde services-detector:', e.message);
       }
 
-      console.warn('[SHIM] Ningún services.json encontrado');
+      console.warn('[SHIM] Ningún servicio encontrado');
       return [];
     })();
 
@@ -617,46 +603,6 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
     console.error(`[SHIM] [DEBUG-DETECTION] ERROR FINAL: No se pudo encontrar ${exeName} para ${type} v${version} en ninguna de las ${uniqueRoots.length} raíces probadas.`);
     return null;
   }
-
-  async function getAvailableVersions(basePath, serviceType){
-    // Normalizar basePath
-    const normalizedBase = basePath.replace(/[\\\/]+/g, '/').replace(/\/$/, '');
-    console.log(`[SHIM] getAvailableVersions para ${serviceType} en ${normalizedBase}`);
-    const versions = [];
-    
-    // Lista de rutas base donde buscar
-    const baseRoots = [
-      `${normalizedBase}/bin/${serviceType}`,
-      `${normalizedBase}/neutralino/bin/${serviceType}`,
-      `${normalizedBase}/usr/bin/${serviceType}`,
-      `./bin/${serviceType}`,
-      `./neutralino/bin/${serviceType}`,
-      `${neutralinoRoot}/bin/${serviceType}`
-    ];
-
-    for (const root of baseRoots) {
-      const normalizedRoot = root.replace(/[\\\/]+/g, '/').replace(/\/$/, '');
-      if (!(await fileExists(normalizedRoot))) {
-        continue;
-      }
-      
-      const entries = await readDir(normalizedRoot);
-      console.log(`[SHIM] readDir para ${normalizedRoot}:`, entries ? entries.length : 0, 'entradas');
-      if (entries) {
-        for (const entry of entries) {
-          const name = (entry && typeof entry === 'object') ? (entry.entry || entry.name) : entry;
-          if (!name || name === '.' || name === '..' || name.startsWith('.') || name === 'tmp') continue;
-          
-          if (!versions.includes(name)) {
-            versions.push(name);
-          }
-        }
-      }
-    }
-    const sorted = versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
-    console.log(`[SHIM] Resultado para ${serviceType}:`, sorted);
-    return sorted;
-  }
   function safeOpen(url){
     try{
       if(globalThis.Neutralino && globalThis.Neutralino.os && globalThis.Neutralino.os.open){
@@ -676,9 +622,9 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
     const now = Date.now();
     
     // Si el caché es válido (< 3 segundos), devolverlo
-    if(netstatCache && (now - netstatCacheTime) < 3000){
+    /*if(netstatCache && (now - netstatCacheTime) < 3000){
       return netstatCache;
-    }
+    }*/
 
     // Si ya hay una petición en curso, esperar a esa
     if(activeNetstatFetch) return activeNetstatFetch;
@@ -927,78 +873,87 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
   const apiTarget = typeof window !== 'undefined' ? window : globalThis;
   const existingAPI = apiTarget.webservAPI;
 
-  const apiImplementation = {
-    getServices: async (hiddenServices)=>{
-      const startTime = Date.now();
+  const apiImplementation = {    
+    getServicesAndState: async () => {
       console.log('[SHIM] >>> getServices INICIO');
-      try{
-        // Crear adaptador de filesystem
-        const fsAdapter = createFilesystemAdapter();
-        
-        // Obtener configuración del usuario
-        const cfgRaw = localStorage.getItem('WebServDev-config');
-        const userConfig = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
-        
-        let basePath = userConfig.basePath || defaultConfig.basePath || appRoot;
-        
-        // RESOLUCIÓN DE RUTAS ABSOLUTAS (Crucial para detección y ejecución)
-        if (basePath === '.' || basePath === './' || !basePath.includes(':')) {
-           try {
-             const res = await execCommand('cd');
-             if (res && res.stdout) {
-               const absoluteBase = res.stdout.trim();
-               console.log('[SHIM] [getServices] Resolviendo basePath relativo a absoluto:', basePath, '->', absoluteBase);
-               basePath = absoluteBase;
-             }
-           } catch(e) {
-             console.warn('[SHIM] [getServices] No se pudo resolver ruta absoluta:', e.message);
-           }
+      try {
+        let result;
+
+        // En modo desarrollo, usar el endpoint del dev-server
+        if (checkIsDev()) {
+          const response = await fetch('/api/get-services', { method: 'GET' });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          const responseData = await response.json();
+          result = responseData.all; // Extraer el array de servicios
+          console.log('[SHIM] <<< getServices (DEV mode) - datos base obtenidos');
+        } else {
+          // En modo producción, usar la función de la librería
+          const fsAdapter = createFilesystemAdapter();
+          const cfgRaw = localStorage.getItem('WebServDev-config');
+          const userConfig = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
+          let basePath = userConfig.basePath || defaultConfig.basePath || appRoot;
+
+          // Resolver ruta absoluta
+          if (basePath === '.' || basePath === './' || !basePath.includes(':')) {
+            try {
+              const res = await execCommand('cd');
+              if (res && res.stdout) {
+                basePath = res.stdout.trim();
+                console.log('[SHIM] [getServices] Resolviendo basePath a absoluto:', basePath);
+              }
+            } catch(e) {
+              console.warn('[SHIM] [getServices] No se pudo resolver ruta absoluta:', e.message);
+            }
+          }
+
+          result = await getAllServicesAvailable({
+            fsAdapter,
+            appPath: basePath,
+            userConfig,
+            log: console.log
+          });
+          console.log('[SHIM] <<< getServices (PROD mode) - datos base obtenidos');
         }
 
-        console.log('[SHIM] Path Base:', basePath);
-        console.log('[SHIM] appRoot:', appRoot);
-
-        // Cargar configuración de app.ini
-        console.log('[SHIM] Cargando configuración de app.ini...');
-        const appConfig = await loadAppConfig(fsAdapter, basePath, console.log);
-        console.log('[SHIM] Configuración cargada:', Object.keys(appConfig).length, 'secciones');
-        
-        // Ejecutar netstat una vez (con caché) para ports
-        console.log('[SHIM] Refrescando Netstat...');
-        await getNetstatData();
-        
-        // Delegar la detección completa a la librería
-        console.log('[SHIM] Llamando a detectServices...');
-        let allServices = await detectServices({
-          fsAdapter,
-          appPath: basePath,
-          userConfig,
-          appConfig,
-          log: console.log
-        });
-        
-        console.log(`[SHIM] detectServices retornó ${allServices.length} servicios`);
-        
-        // Filtrar servicios ocultos
-        const hiddenArray = Array.isArray(hiddenServices) ? hiddenServices : [];
-        const visibleServices = allServices.filter(s => !hiddenArray.includes(s.name));
-        
-        // Agregar servicios ocultos al final con status 'hidden'
-        hiddenArray.forEach(name => {
-          const s = allServices.find(x => x.name === name);
-          if(s) {
-            visibleServices.push({ ...s, status: 'hidden' });
+        // Centralizar verificación de estado de ejecución (procesos y puertos)
+        console.log('[SHIM] Verificando estado de ejecución para', result.length, 'servicios...');
+        for (const service of result) {
+          try {
+            const statusInfo = await checkServiceStatus(service);
+            service.running = statusInfo.processRunning;
+            service.status = statusInfo.status; // Actualizar status a 'running', 'stopped', etc.
+            service.portInUse = statusInfo.portInUse;
+            service.portOccupiedBy = statusInfo.portOccupiedBy;
+            service.portOccupiedByName = statusInfo.portOccupiedByName;
+            service.canStart = service.installedVersion && !service.running;
+            service.canStop = service.running;
+            console.log(`[SHIM] ${service.name}: ${statusInfo.status} (running: ${statusInfo.processRunning})`);
+          } catch (e) {
+            console.warn(`[SHIM] Error verificando estado de ${service.name}:`, e.message);
+            service.running = false;
+            service.status = 'unknown';
           }
-        });
+        }
+
+        console.log('[SHIM] <<< getServices FIN - estado verificado');
         
-        console.log(`[SHIM] <<< getServices FIN (Total: ${Date.now() - startTime}ms, Items: ${visibleServices.length})`);
-        return visibleServices;
-      }catch(e){
-        console.error('[SHIM] !!! ERROR FATAL getServices:', e);
-        return [
-          { id: 'apache', name: 'Apache', type: 'apache', status: 'error', details: e.message },
-          { id: 'mysql', name: 'MySQL', type: 'mysql', status: 'error', details: e.message }
-        ];
+        // Construir la estructura de respuesta
+        const r =  {
+          all: result,
+          installer: result, //.filter(s => s.type !== 'language'),
+          services: result.filter(s => s.currentVersion && s.type !== 'language')
+        };
+        console.log('[SHIM] getServices resultado final:', r);
+        return r;
+      } catch (e) {
+        console.error('[SHIM] !!! ERROR getServices:', e);
+        return {
+          all: [],
+          installer: [],
+          services: []
+        };
       }
     },
     startService: async (serviceName)=>{
@@ -1423,7 +1378,7 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
           { "id": "apache", "name": "Apache", "versions": [] }
         ]
       };
-    },
+    },    
     installService: async (data) => {
       console.log('[SHIM] ============ installService INICIO ============');
       console.log('[SHIM] Datos recibidos:', data);
@@ -1465,9 +1420,9 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
 
         // Limpiar solo caracteres verdaderamente Prohibidos en Windows: < > : " / \ | ? *
         const cleanVersion = service.version.replace(/[<>:"\/\\|?*]/g, '_').trim();
-        const destDir = `${basePath}\\neutralino\\bin\\${service.id}\\${cleanVersion}`.replace(/\\\\/g, '\\');
+        const destDir = `${basePath}\\neutralino\\bin\\${service.type}\\${cleanVersion}`.replace(/\\\\/g, '\\');
         const tmpDir = `${basePath}\\tmp`.replace(/\\\\/g, '\\');
-        const tmpZipPath = `${tmpDir}\\${service.id}-${cleanVersion}.zip`.replace(/\\\\/g, '\\').replace(/\s+/g, '_');
+        const tmpZipPath = `${tmpDir}\\${service.type}-${cleanVersion}.zip`.replace(/\\\\/g, '\\').replace(/\s+/g, '_');
 
         console.log(`[SHIM] Instalando: ${service.name} v${service.version}`);
         console.log(`[SHIM] BasePath resuelto: ${basePath}`);
@@ -1672,7 +1627,8 @@ import { detectServices, loadAppConfig, getAvailableVersions } from './lib/servi
             }
             
             // Buscar httpd.conf de Apache
-            const apacheVersions = await getAvailableVersions(basePath, 'apache');
+            const fsAdapter = createFilesystemAdapter();
+            const apacheVersions = await getAvailableVersions(fsAdapter, basePath, 'apache');
             if (apacheVersions.length === 0) {
               console.warn(`[SHIM] No se encontró Apache instalado`);
               return { success: true, warning: 'Apache no instalado' };

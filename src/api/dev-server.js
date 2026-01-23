@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
-import { detectServices, loadAppConfig } from '../neutralino/lib/services-detector.js';
+import { detectServices, loadAppConfig, loadServicesConfig, getAllServicesAvailable, getAvailableVersions } from '../neutralino/lib/services-detector.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const basePath = path.resolve(__dirname, '../../');
@@ -42,8 +42,8 @@ const nodeAdapter = {
       console.log('[ADAPTER] readDir result:', result.length, 'items');
       return { entries: result };
     } catch (err) {
-      // Don't log ENOENT errors as they are expected during service detection
-      if (err.code !== 'ENOENT') {
+      // Don't log ENOENT or ENOTDIR errors as they are expected during service detection
+      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') {
         console.error('[ADAPTER] readDir error:', err);
       }
       throw err;
@@ -54,10 +54,10 @@ const nodeAdapter = {
     console.log('[ADAPTER] fileExists called:', filePath);
     try {
       await fs.access(filePath);
-      console.log('[ADAPTER] fileExists: true');
+      console.log('[ADAPTER] fileExists: EXISTS');
       return { exists: true };
     } catch {
-      console.log('[ADAPTER] fileExists: false');
+      console.log('[ADAPTER] fileExists: NOT EXISTS');
       return { exists: false };
     }
   },
@@ -104,7 +104,10 @@ const nodeAdapter = {
   }
 };
 
-const server = http.createServer((req, res) => {
+
+/////////////////// HTTP SERVER ///////////////////
+
+const server = http.createServer(async (req, res) => {
   console.log('[REQUEST]', req.method, req.url);
   
   // CORS headers
@@ -315,53 +318,62 @@ const server = http.createServer((req, res) => {
     return;
   }
   
-  // Get services endpoint
+  
+  // Get all services information (installed, available, status)
+  // PARA DEV: Para comprobar este método se puede usar node test-get-services.js  (y así no arrancar todo el servidor dev)
   if (req.url === '/api/get-services' && req.method === 'GET') {
     console.log('[REQUEST] Handling /api/get-services');
     
-    (async () => {
-      try {
-        // Always use real detectServices function, same as production
-        const appConfig = await loadAppConfig(nodeAdapter, basePath);
-        const services = await detectServices({
-          fsAdapter: nodeAdapter,
-          appPath: basePath,
-          userConfig: {},
-          appConfig,
-          log: console.log
-        });
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(services));
-        console.log('[REQUEST] /api/get-services response sent');
-      } catch (err) {
-        console.error('[REQUEST] /api/get-services error:', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
+    try {
+      console.log('[REQUEST] Calling getAllServicesAvailable with appPath:', basePath);
+      
+      // Debug getAvailableVersions
+      const phpVersions = await getAvailableVersions(nodeAdapter, basePath, 'php');
+      console.log('[DEBUG] getAvailableVersions for php:', phpVersions);
+      
+      const result = await getAllServicesAvailable({
+        fsAdapter: nodeAdapter,
+        appPath: basePath,
+        userConfig: {},
+        log: console.log
+      });
+      
+      console.log('[REQUEST] getAllServicesAvailable returned', result.length, 'services');
+      result.forEach(s => {
+        console.log(`[REQUEST] Service ${s.name}: installed=${s.installedVersion}, available=${JSON.stringify(s.availableVersions)}`);
+      });
+      
+      // Simulate shim processing: add status checks
+      for (const service of result) {
+        try {
+          // Simple status check (in dev, assume not running)
+          service.running = false;
+          service.status = service.installedVersion ? 'stopped' : 'not-installed';
+          service.portInUse = false;
+          service.canStart = service.installedVersion && !service.running;
+          service.canStop = service.running;
+        } catch (e) {
+          console.warn(`[REQUEST] Error checking status for ${service.name}:`, e.message);
+          service.running = false;
+          service.status = 'unknown';
+        }
       }
-    })();
-    
-    return;
-  }
-  
-  // Serve services.json
-  if (req.url === '/services.json' && req.method === 'GET') {
-    console.log('[REQUEST] Handling /services.json');
-    
-    (async () => {
-      try {
-        const servicesPath = path.join(basePath, 'neutralino', 'www', 'services.json');
-        const content = await nodeAdapter.readFile(servicesPath);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(content);
-        console.log('[REQUEST] /services.json response sent');
-      } catch (err) {
-        console.error('[REQUEST] /services.json error:', err);
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Not found' }));
-      }
-    })();
+      
+      // Return structured response like shim
+      const response = {
+        all: result,
+        installer: result.filter(s => s.type !== 'language'),
+        services: result.filter(s => s.currentVersion && s.type !== 'language')
+      };
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(response));
+      console.log('[REQUEST] /api/get-services response sent with', result.length, 'total services');
+    } catch (err) {
+      console.error('[REQUEST] /api/get-services error:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
     
     return;
   }
@@ -388,6 +400,6 @@ server.on('connection', (socket) => {
 const PORT = 5174;
 server.listen(PORT, () => {
   console.log(`[SERVER] 🚀 Debug API Server running on http://localhost:${PORT}`);
-  console.log('[SERVER] Endpoints: /health, /api/read-dir, /api/file-exists, /api/read-file, /api/write-log, /api/exec-command, /api/get-services, /services.json');
+  console.log('[SERVER] Endpoints: /health, /api/read-dir, /api/file-exists, /api/read-file, /api/write-log, /api/exec-command, /api/get-services');
   console.log('[SERVER] Ready to accept requests');
 });

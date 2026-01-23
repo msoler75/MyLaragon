@@ -517,7 +517,7 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
             </h3>
             <p className="text-xs font-bold text-app-text-muted uppercase tracking-widest max-w-sm text-center px-6 leading-relaxed mb-8">
               {services.length === 0 
-                ? "El archivo services.json está vacío o no se pudo cargar. Revisa los logs en la pestaña Registro." 
+                ? "No se pudieron cargar los servicios. Revisa los logs en la pestaña Registro." 
                 : (t.noServicesConfigured || "Todos los servicios están ocultos.")}
             </p>
             <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">

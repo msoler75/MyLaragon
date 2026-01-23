@@ -43,6 +43,8 @@ Object.entries(themeFiles).forEach(([path, content]) => {
 function App() {
   const [activeTab, setActiveTab] = useState('services')
   const [services, setServices] = useState([])
+  const [installerServices, setInstallerServices] = useState([])
+  const [runningServices, setRunningServices] = useState([])
   const [config, setConfig] = useState({ language: 'es', theme: 'system', toastEnabled: true, monitoringAuto: true })
   const [loading, setLoading] = useState(false)
   const [processingServices, setProcessingServices] = useState([])
@@ -82,16 +84,25 @@ function App() {
       if (!silent) setLoading(true)
       try {
         console.log('[APP] Llamando a getServices con hidden:', hiddenToUse);
-        const servicesData = await window.webservAPI.getServices(hiddenToUse)
+        const servicesData = await window.webservAPI.getServicesAndState(hiddenToUse)
         console.log('[APP] Servicios recibidos (DATA):', JSON.stringify(servicesData));
         
-        if (!servicesData || !Array.isArray(servicesData)) {
-          console.error('[APP] getServices no devolvi� un array v�lido:', servicesData);
+        if (!servicesData || !servicesData.all || !Array.isArray(servicesData.all)) {
+          console.error('[APP] getServices no devolvió un objeto válido con all:', servicesData);
         } else {
-          if (JSON.stringify(servicesData) !== JSON.stringify(lastServicesRef.current)) {
-            setServices(servicesData)
-            lastServicesRef.current = servicesData;
-            console.log('[APP] State actualizado con', servicesData.length, 'servicios');
+          const servicesArray = servicesData.all;
+          const installerArray = servicesData.installer || [];
+          const runningArray = servicesData.services || [];
+          
+          const currentState = { all: servicesArray, installer: installerArray, services: runningArray };
+          const lastState = lastServicesRef.current || {};
+          
+          if (JSON.stringify(currentState) !== JSON.stringify(lastState)) {
+            setServices(servicesArray)
+            setInstallerServices(installerArray)
+            setRunningServices(runningArray)
+            lastServicesRef.current = currentState;
+            console.log('[APP] State actualizado con', servicesArray.length, 'servicios totales,', installerArray.length, 'para instalar,', runningArray.length, 'ejecutándose');
           } else {
             console.log('[APP] Servicios sin cambios, no actualizando state');
           }
@@ -466,7 +477,7 @@ function App() {
             {/* Services View */}
             <div className={activeTab === 'services' ? 'block animate-in fade-in slide-in-from-bottom-4 duration-500' : 'hidden'}>
               <ServicesView 
-                services={services} 
+                services={runningServices} 
                 hiddenServices={hiddenServices}
                 processingServices={processingServices}
                 isBulkRunning={isBulkRunning}
@@ -478,9 +489,9 @@ function App() {
                 onStartAll={async () => {
                   if (window.webservAPI) {
                     setIsBulkRunning(true)
-                    const current = await window.webservAPI.getServices(hiddenServices)
-                    setServices(current)
-                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status !== 'running' && !s.isLibrary)
+                    const current = await window.webservAPI.getServicesAndState(hiddenServices)
+                    setServices(current.all)
+                    const visible = current.all.filter(s => !hiddenServices.includes(s.name) && s.status !== 'running' && !s.isLibrary)
                     await Promise.all(visible.map(s => handleStartService(s.name)))
                     setIsBulkRunning(false)
                   }
@@ -488,9 +499,9 @@ function App() {
                 onStopAll={async () => {
                   if (window.webservAPI) {
                     setIsBulkRunning(true)
-                    const current = await window.webservAPI.getServices(hiddenServices)
-                    setServices(current)
-                    const visible = current.filter(s => !hiddenServices.includes(s.name) && s.status === 'running' && !s.isLibrary)
+                    const current = await window.webservAPI.getServicesAndState(hiddenServices)
+                    setServices(current.all)
+                    const visible = current.all.filter(s => !hiddenServices.includes(s.name) && s.status === 'running' && !s.isLibrary)
                     await Promise.all(visible.map(s => handleStopService(s.name)))
                     setIsBulkRunning(false)
                   }
@@ -501,7 +512,7 @@ function App() {
 
             {/* Services Manager View (Installer) */}
             <div className={activeTab === 'install' ? 'block animate-in fade-in slide-in-from-bottom-4 duration-500' : 'hidden'}>
-              <InstallerView t={t} onInstalled={loadServices} services={services} activeTab={activeTab} />
+              <InstallerView t={t} onInstalled={loadServices} services={installerServices} activeTab={activeTab} />
             </div>
 
             {/* Tools View */}

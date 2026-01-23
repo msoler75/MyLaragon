@@ -47,7 +47,7 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
    - Corrige los errores detectados de forma autónoma; solo contacta al usuario si el problema requiere una decisión de negocio o una intervención física externa.
 
 5. **Integración de Servicios**:
-   - La definición de servicios instalables está en `services.json`.
+   - La definición de servicios instalables está hardcodeada en `src/neutralino/lib/services-detector.js`.
    - La detección de binarios debe seguir el patrón de búsqueda en `bin/<tipo>/<versión>/<ejecutable>`.
 
 6. **Tests realistas**
@@ -71,6 +71,17 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
    - El comportamiento en modo desarrollo (dev-server + vite) debe ser idéntico al modo producción (Neutralino runtime).
    - Si encuentras discrepancias, refactoriza para unificar la lógica en `lib/` y asegúrate de que ambos modos usen las mismas funciones.
    - Minimizar la brecha entre dev y prod es crucial para evitar "works on my machine" bugs.
+
+10. **dev-server.js**
+    - PARA PROBAR dev-server.js en ejecución en background, usa la task configurada para vscode.
+    - *Nunca* ejecutes node dev-server.js directamente en la terminal, ya que bloqueará la terminal y evitará ejecutar otros comandos (tests, health checks) en paralelo.
+    - Para comprobar el método /api/get-services, ejecuta "node test-get-services.js" en la terminal. (y así no arrancar todo el servidor dev)
+
+11. **Vistas**
+
+   - la vista "instalar" ha de mostrar todos los servicios existentes y sus versiones existentes. y para cada version indicar si ya está instalada o no. con botones de instalar o desinstalar cada version.
+   - la vista "servicios" ha de mostrar servicios con botones de "iniciar" (si ese servicio tiene instalada alguna version) o "detener" si el servicio está iniciado. Pero no se muestan servicios de tipo lenguage (como php o python) porque no se pueden "iniciar" o "detener" como tales, son lenguages
+   - los servicios de lenguajes, como "php" o "python" no serán servicios que se puedan "iniciar" y no aparecerán en la vista "servicios", pero sí en la vista "instalar", porque son paquetes o librerías que sí se pueden instalar/desinstalar.
 
 ## Workflows Comunes
 - **Fix Duplication**: Ejecutar `node scripts/sync-resources.js`.

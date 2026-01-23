@@ -50,11 +50,11 @@ export default defineConfig({
         }
 
         // Verificar que los archivos críticos existan en www/
-        ['neutralino-shim.js', 'services.json', 'neutralino.js', 'bootstrap.html'].forEach(checkMasterFile);
+        ['neutralino-shim.js', 'neutralino.js', 'bootstrap.html'].forEach(checkMasterFile);
 
         const files = fs.readdirSync(wwwDir);
         // Archivos a preservar (generados por scripts/sync-resources.js)
-        const preserve = ['neutralino.js', 'neutralino-shim.js', 'services.json', 'vite.svg', 'bootstrap.html', 'test-services.html'];
+        const preserve = ['neutralino.js', 'neutralino-shim.js', 'vite.svg', 'bootstrap.html', 'test-services.html'];
         
         files.forEach(file => {
           if (!preserve.includes(file)) {

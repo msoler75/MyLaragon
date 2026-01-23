@@ -98,6 +98,6 @@
   "deleting": "Löschen",
   "noServicesDetected": "Keine Dienste im lokalen Repository",
   "noServicesConfigured": "Es scheint, als hätten Sie noch keine Dienste konfiguriert oder installiert.",
-  "verifyServicesJson": "Überprüfen Sie, ob services.json im App-Stammverzeichnis vorhanden ist",
+  "verifyServicesJson": "Überprüfen Sie, ob die Dienste ordnungsgemäß konfiguriert sind",
   "phpRequired": "PHP erforderlich zum Starten"
 }

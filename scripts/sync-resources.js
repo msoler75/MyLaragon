@@ -30,10 +30,6 @@ const syncConfig = [
     header: "//  NO EDITAR ESTE ARCHIVO DIRECTAMENTE\n// Editable en: src/neutralino/neutralino-shim.js\n\n"
   },
   {
-    source: "src/neutralino/services.json",
-    target: "neutralino/www/services.json",
-  },
-  {
     source: "src/neutralino/bootstrap.html",
     target: "neutralino/www/bootstrap.html",
     header: "<!--  NO EDITAR ESTE ARCHIVO DIRECTAMENTE - EDITAR src/neutralino/bootstrap.html -->\n"

@@ -173,8 +173,17 @@ export class NodeFilesystemAdapter {
   async readDir(path) {
     await this.ready;
     const entries = this.fs.readdirSync(path);
-    // Devolver en formato compatible con dev-server: { entries: [strings] }
-    return { entries };
+    // Devolver en formato compatible con dev-server: { entries: [{ entry, type }] }
+    const result = [];
+    for (const name of entries) {
+      const fullPath = this.path.join(path, name);
+      const stats = this.fs.statSync(fullPath);
+      result.push({
+        entry: name,
+        type: stats.isDirectory() ? 'DIRECTORY' : 'FILE'
+      });
+    }
+    return { entries: result };
   }
 
   async fileExists(path) {
