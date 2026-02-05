@@ -2,6 +2,9 @@
 import { createFilesystemAdapter } from './lib/fs-adapter.js';
 import { getAvailableVersions, getAllServicesAvailable } from './lib/services-detector.js';
 
+// Simple path join for browser compatibility
+const pathJoin = (...parts) => parts.join('/').replace(/\/+/g, '/');
+
 (function(){
   // --- SISTEMA DE LOGS PERSISTENTES (CAPA TEMPRANA) ---
   const originalConsole = {
@@ -290,6 +293,48 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
     return false;
   };
 
+  const checkDirExists = async (dirPath) => {
+    if (checkIsDev()) {
+      try {
+        const resp = await fetch('/api/dir-exists', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: dirPath })
+        });
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        return data.exists;
+      } catch (e) { return false; }
+    }
+    if (globalThis.Neutralino && globalThis.Neutralino.filesystem) {
+      try {
+        const result = await globalThis.Neutralino.filesystem.getStats(dirPath);
+        return result.exists;
+      } catch (e) { return false; }
+    }
+    return false;
+  };
+
+  const createDir = async (dirPath, recursive = true) => {
+    if (checkIsDev()) {
+      try {
+        const resp = await fetch('/api/create-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: dirPath, recursive })
+        });
+        return resp.ok;
+      } catch (e) { return false; }
+    }
+    if (globalThis.Neutralino && globalThis.Neutralino.filesystem) {
+      try {
+        await globalThis.Neutralino.filesystem.createDirectory(dirPath);
+        return true;
+      } catch (e) { return false; }
+    }
+    return false;
+  };
+
   /**
    * Carga la configuración de servicios desde el archivo services.json
    * Soporta tanto formato Array como Objeto { services: [...] }
@@ -297,37 +342,24 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
   let cachedServices = null;
   let servicesPromise = null;
 
-  async function loadServicesConfig() {
+  async function loadServicesConfig(fsAdapter, basePath) {
     if (cachedServices) return cachedServices;
     if (servicesPromise) return servicesPromise;
 
     servicesPromise = (async () => {
       try {
         console.log(`[SHIM] Cargando servicios usando services-detector`);
-        const fsAdapter = createFilesystemAdapter();
         const cfgRaw = localStorage.getItem('WebServDev-config');
         const userConfig = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
-        let basePath = userConfig.basePath || defaultConfig.basePath || appRoot;
 
-        // Resolver ruta absoluta
-        if (basePath === '.' || basePath === './' || !basePath.includes(':')) {
-          try {
-            const res = await execCommand('cd');
-            if (res && res.stdout) {
-              basePath = res.stdout.trim();
-              console.log('[SHIM] Resolviendo basePath a absoluto:', basePath);
-            }
-          } catch(e) {
-            console.warn('[SHIM] No se pudo resolver ruta absoluta:', e.message);
-          }
-        }
-
+        console.log('[SHIM] Llamando getAllServicesAvailable con appPath:', basePath);
         const list = await getAllServicesAvailable({
           fsAdapter,
           appPath: basePath,
           userConfig,
           log: console.log
         });
+        console.log('[SHIM] Resultado getAllServicesAvailable:', list);
         if (list.length > 0) {
           console.log(`[SHIM] Servicios cargados exitosamente desde services-detector`);
           cachedServices = list;
@@ -680,6 +712,7 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
 
   // Cache para lista de procesos
   let processCache = null;
+  let processCacheTime = 0;
   let lastTaskListUpdate = 0;
   let activeProcessFetch = null;
 
@@ -754,6 +787,7 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
           let portInUse = false;
           let portOccupiedBy = null;
           let portOccupiedByName = null;
+          let portOccupiedByExpectedProcess = false;
           try {
             const netstatData = await getNetstatData();
             const portPid = netstatData[port];
@@ -762,12 +796,17 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
               portInUse = true;
               console.log('[SHIM]', service.name, 'Puerto', port, 'en uso por PID:', portPid);
               
-              // Si el puerto está en uso pero NO por nuestro proceso, obtener el nombre
-              if(!processRunning){
-                portOccupiedByName = await getProcessName(portPid);
-                portOccupiedBy = portPid;
-                console.log('[SHIM]', service.name, 'Puerto', port, 'ocupado por:', portOccupiedByName || `PID ${portPid}`);
+              // Obtener el nombre del proceso que está usando el puerto
+              portOccupiedByName = await getProcessName(portPid);
+              portOccupiedBy = portPid;
+              
+              // Verificar si el proceso que usa el puerto es el esperado
+              if(portOccupiedByName && processName){
+                portOccupiedByExpectedProcess = portOccupiedByName.toLowerCase() === processName.toLowerCase();
+                console.log('[SHIM]', service.name, 'Puerto ocupado por proceso esperado:', portOccupiedByExpectedProcess, '(', portOccupiedByName, 'vs', processName, ')');
               }
+              
+              console.log('[SHIM]', service.name, 'Puerto', port, 'ocupado por:', portOccupiedByName || `PID ${portPid}`);
             }
           } catch(e) {
             console.log('[SHIM] Error verificando puerto:', e.message);
@@ -777,7 +816,11 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
           let status = 'stopped';
           let details = 'Servicio detenido';
           
-          if(processRunning){
+          // Para MySQL, si el puerto está en uso, considerarlo como corriendo
+          // (tasklist no detecta mysqld.exe de manera confiable)
+          const isMySQL = type === 'mysql' || type === 'mariadb';
+          
+          if(processRunning || portOccupiedByExpectedProcess || (isMySQL && portInUse)){
             status = 'running';
             details = `Servicio activo en puerto ${port}`;
           } else if(portInUse && portOccupiedByName){
@@ -799,6 +842,7 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
             portInUse,
             portOccupiedBy,
             portOccupiedByName,
+            portOccupiedByExpectedProcess,
             processName,
             details
           };
@@ -883,7 +927,8 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
         if (checkIsDev()) {
           const response = await fetch('/api/get-services', { method: 'GET' });
           if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const text = await response.text();
+            throw new Error(`HTTP ${response.status}: ${response.statusText} - ${text}`);
           }
           const responseData = await response.json();
           result = responseData.all; // Extraer el array de servicios
@@ -939,6 +984,11 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
 
         console.log('[SHIM] <<< getServices FIN - estado verificado');
         
+        // Mapear installStatus a isInstalled para compatibilidad con frontend
+        for (const service of result) {
+          service.isInstalled = service.installStatus;
+        }
+        
         // Construir la estructura de respuesta
         const r =  {
           all: result,
@@ -982,9 +1032,10 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
         console.log('[SHIM] Base path determinado:', basePath);
         console.log('[SHIM] neutralinoRoot:', neutralinoRoot);
         
+        const fsAdapter = createFilesystemAdapter();
         // Cargar configuración de servicios
-        const servicesList = await loadServicesConfig();
-        
+        const servicesList = await loadServicesConfig(fsAdapter, basePath);
+        console.log('[SHIM] Servicios cargados:', servicesList.length);
         const service = servicesList.find(s => s.name === serviceName);
         if(!service){
           const errorMsg = servicesList.length === 0 
@@ -1060,6 +1111,36 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
         // Normalizar rutas para evitar problemas con slashes mezclados
         const normalizedExe = fullExe.replace(/\//g, '\\');
         
+        // Preparar directorio de datos para MySQL si es necesario
+        const mysqlDataDir = pathJoin(basePath, 'data', 'mysql').replace(/\//g, '\\');
+        if (type === 'mysql' || type === 'mariadb') {
+          // Verificar si existe el directorio MySQL
+          const mysqlDataExists = await checkDirExists(mysqlDataDir);
+          if (!mysqlDataExists) {
+            await createDir(mysqlDataDir);
+            console.log('[SHIM] Directorio de datos MySQL creado:', mysqlDataDir);
+            // Inicializar base de datos MySQL
+            console.log('[SHIM] Inicializando base de datos MySQL...');
+            try {
+              const initCmd = `"${normalizedExe}" --initialize-insecure --datadir="${mysqlDataDir}"`;
+              console.log('[SHIM] Comando inicialización:', initCmd);
+              const initResult = await execCommand(initCmd);
+              console.log('[SHIM] Inicialización stdout:', initResult?.stdout || '(vacío)');
+              console.log('[SHIM] Inicialización stderr:', initResult?.stderr || '(vacío)');
+              console.log('[SHIM] Inicialización exitCode:', initResult?.exitCode);
+              if (initResult?.exitCode !== 0) {
+                console.warn('[SHIM] Inicialización falló, pero continuando...');
+              } else {
+                console.log('[SHIM] ✓ Base de datos MySQL inicializada');
+              }
+            } catch (e) {
+              console.warn('[SHIM] Error en inicialización MySQL:', e.message);
+            }
+          } else {
+            console.log('[SHIM] Directorio de datos MySQL ya existe:', mysqlDataDir);
+          }
+        }
+        
         switch(type){
           case 'apache':{
             // Basar la ruta en la ubicación real del ejecutable
@@ -1097,7 +1178,8 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
           }
           case 'mysql':
           case 'mariadb':{
-            startCmd = `start /B "" "${fullExe}" --standalone`;
+            startCmd = `powershell -Command "Start-Process -FilePath '${normalizedExe}' -ArgumentList '--datadir=${mysqlDataDir}', '--port=3306', '--bind-address=127.0.0.1', '--console' -NoNewWindow -PassThru | Select-Object -ExpandProperty Id"`;
+            isBackground = true;
             break;
           }
           case 'mailpit':{
@@ -1137,6 +1219,33 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
         if(type === 'apache' && result?.stdout){
           const pid = result.stdout.trim();
           console.log('[SHIM] Apache iniciado con PID:', pid);
+          
+          // Verificar si el proceso realmente está corriendo
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const checkResult = await execCommand(`tasklist /FI "PID eq ${pid}" /NH /FO CSV`);
+          if (!checkResult.stdout || !checkResult.stdout.includes(pid)) {
+            console.error('[SHIM] ERROR: Apache se cerró inmediatamente después de iniciar. PID:', pid);
+            throw new Error('Apache falló al iniciar (proceso cerrado inmediatamente)');
+          }
+          console.log('[SHIM] ✓ Apache confirmado corriendo con PID:', pid);
+        }
+        
+        // Si es MySQL y devuelve PID, verificar
+        if((type === 'mysql' || type === 'mariadb') && result?.stdout){
+          const pid = result.stdout.trim();
+          console.log('[SHIM] MySQL iniciado con PID:', pid);
+          
+          // Verificar si el proceso realmente está corriendo
+          await new Promise(resolve => setTimeout(resolve, 2000)); // MySQL toma más tiempo
+          const checkResult = await execCommand(`tasklist /FI "PID eq ${pid}" /NH /FO CSV`);
+          if (!checkResult.stdout || !checkResult.stdout.includes(pid)) {
+            console.error('[SHIM] ERROR: MySQL se cerró inmediatamente después de iniciar. PID:', pid);
+            
+            // NO intentar recuperación automática - dejar que el usuario decida
+            // Solo informar que puede requerir recuperación
+            throw new Error('MySQL falló al iniciar (proceso cerrado inmediatamente). Puede requerir recuperación de base de datos.');
+          }
+          console.log('[SHIM] ✓ MySQL confirmado corriendo con PID:', pid);
         }
         
         // Invalidar caché de netstat porque el puerto puede estar en transición
@@ -1149,7 +1258,7 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
         return { success: true, message: `${serviceName} started` };
       }catch(e){
         const errorMsg = e.message || String(e);
-        console.error(`Error al iniciar servicio: ${errorMsg}`);
+        console.error(`Error al iniciar servicio: ${errorMsg}`, e);
         return { success: false, message: errorMsg };
       }
     },
@@ -1157,10 +1266,24 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
       try{
         const cfgRaw = localStorage.getItem('WebServDev-config');
         const cfg = cfgRaw ? JSON.parse(cfgRaw) : defaultConfig;
-        const basePath = cfg.basePath || defaultConfig.basePath;
+        let basePath = cfg.basePath || defaultConfig.basePath;
         
+        // RESOLUCIÓN DE RUTA ABSOLUTA TRASCENDENTAL
+        if (basePath === '.' || basePath === './' || !basePath.includes(':')) {
+           try {
+             const res = await execCommand('cd');
+             if (res && res.stdout) {
+               basePath = res.stdout.trim();
+               console.log('[SHIM] [stopService] Resolviendo basePath a absoluto:', basePath);
+             }
+           } catch(e) {
+             console.warn('[SHIM] [stopService] No se pudo resolver ruta absoluta:', e.message);
+           }
+        }
+        
+        const fsAdapter = createFilesystemAdapter();
         // Cargar configuración de servicios
-        const servicesList = await loadServicesConfig();
+        const servicesList = await loadServicesConfig(fsAdapter, basePath);
         
         const service = servicesList.find(s => s.name === serviceName);
         if(!service){
@@ -1222,6 +1345,8 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
           case 'mariadb':{
             // MySQL es mejor detenerlo con taskkill directamente
             await execCommand(`taskkill /IM ${exe} /F 2>NUL`);
+            // MySQL puede tardar en liberar el puerto, esperar más tiempo
+            await new Promise(resolve => setTimeout(resolve, 5000));
             break;
           }
           default:{
@@ -1735,6 +1860,95 @@ import { getAvailableVersions, getAllServicesAvailable } from './lib/services-de
     },
     openEnvVars: async () => {
       await execCommand('control sysdm.cpl,,3');
+    },
+
+    // ============= FUNCIONES DE RECUPERACIÓN MYSQL =============
+    getMySQLRecoveryStatus: async () => {
+      try {
+        console.log('[SHIM] Consultando estado de recuperación MySQL...');
+
+        // Ejecutar script para obtener estado
+        // Usar Node.js para ejecutar el script y obtener el estado
+        // Usar ruta relativa desde el directorio actual
+        const statusCmd = `node -e "
+          import('./scripts/mysql-recovery.js').then(module => {
+            return module.getRecoveryStatus();
+          }).then(status => {
+            console.log(JSON.stringify(status));
+          }).catch(err => {
+            console.error('Error:', err.message);
+            process.exit(1);
+          });
+        "`;
+
+        console.log('[SHIM] Ejecutando comando:', statusCmd);
+        const result = await execCommand(statusCmd);
+
+        if (result.exitCode === 0 && result.stdout) {
+          try {
+            const status = JSON.parse(result.stdout.trim());
+            console.log('[SHIM] Estado de recuperación obtenido:', status);
+            return status;
+          } catch (parseError) {
+            console.error('[SHIM] Error parseando respuesta de recuperación:', parseError);
+            return { error: 'Error parseando respuesta', canRecover: true };
+          }
+        } else {
+          console.error('[SHIM] Error obteniendo estado de recuperación - exitCode:', result.exitCode, 'stdout:', result.stdout, 'stderr:', result.stderr);
+          return { error: 'Error ejecutando consulta', canRecover: true };
+        }
+      } catch (error) {
+        console.error('[SHIM] Error en getMySQLRecoveryStatus:', error);
+        return { error: error.message, canRecover: true };
+      }
+    },
+
+    runMySQLRecovery: async () => {
+      try {
+        console.log('[SHIM] Iniciando recuperación manual de MySQL...');
+
+        // Ejecutar script de recuperación
+        const basePath = globalThis.NL_PATH || '.';
+        const recoveryScript = pathJoin(basePath, 'scripts', 'mysql-recovery.js').replace(/\//g, '\\');
+
+        // Ejecutar recuperación usando Node.js
+        const recoveryCmd = `node -e "
+          import('./scripts/mysql-recovery.js').then(module => {
+            return module.runManualRecovery();
+          }).then(result => {
+            console.log('=== RECOVERY_RESULT ===');
+            console.log(JSON.stringify(result));
+            console.log('=== END_RECOVERY_RESULT ===');
+          }).catch(err => {
+            console.error('Error:', err.message);
+            process.exit(1);
+          });
+        "`;
+
+        const result = await execCommand(recoveryCmd);
+
+        if (result.exitCode === 0 && result.stdout) {
+          // Extraer el JSON del resultado
+          const jsonMatch = result.stdout.match(/=== RECOVERY_RESULT ===\n([\s\S]*?)\n=== END_RECOVERY_RESULT ===/);
+          if (jsonMatch) {
+            try {
+              const recoveryResult = JSON.parse(jsonMatch[1]);
+              console.log('[SHIM] Recuperación completada:', recoveryResult);
+              return recoveryResult;
+            } catch (parseError) {
+              console.error('[SHIM] Error parseando resultado de recuperación:', parseError);
+              return { success: false, error: 'Error parseando resultado' };
+            }
+          }
+        }
+
+        console.error('[SHIM] Error en recuperación manual:', result.stderr);
+        return { success: false, error: result.stderr || 'Error desconocido' };
+
+      } catch (error) {
+        console.error('[SHIM] Error en runMySQLRecovery:', error);
+        return { success: false, error: error.message };
+      }
     }
   };
 

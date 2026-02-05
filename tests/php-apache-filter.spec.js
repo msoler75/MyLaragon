@@ -30,13 +30,13 @@ describe("Filtrado de versiones PHP para Apache", () => {
     console.log('[TEST] Versiones PHP detectadas en Apache:', apache.availablePhpVersions);
     
     // Todas las versiones en availablePhpVersions deben tener el módulo Apache
-    for (const version of apache.availablePhpVersions || []) {
-      console.log(`[TEST] Verificando PHP ${version}...`);
+    for (const versionObj of apache.availablePhpVersions || []) {
+      console.log(`[TEST] Verificando PHP ${versionObj}...`);
       
       const allPhpVersions = await getAvailableVersions(fsAdapter, ROOT, 'php');
       assert.ok(
-        allPhpVersions.includes(version),
-        `PHP ${version} en availablePhpVersions pero no está en versiones detectadas`
+        allPhpVersions.includes(versionObj.version),
+        `PHP ${versionObj} en availablePhpVersions pero no está en versiones detectadas`
       );
     }
     

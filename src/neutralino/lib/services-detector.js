@@ -86,9 +86,24 @@ export async function loadAppConfig(fsAdapter, appPath, log = () => {}) {
 
 // Buscar ruta binaria de un servicio en un appPath concreto
 export async function loadServicesConfig(fsAdapter, appPath) {
-  const servicesPath = path.join(appPath, 'src', 'neutralino', 'services.json');
-  const content = await fsAdapter.readFile(servicesPath);
-  return JSON.parse(content);
+
+  // Usar solo rutas relativas al proyecto raíz
+  const possiblePaths = [
+    'src/neutralino/services.json', // Development
+    'neutralino/www/services.json', // Production (Neutralino bundle)
+    'neutralino/services.json' // Alternative production path
+  ];
+
+  for (const servicesPath of possiblePaths) {
+    try {
+      const content = await fsAdapter.readFile(servicesPath);
+      return JSON.parse(content);
+    } catch (e) {
+      // Continue to next path
+    }
+  }
+
+  throw new Error('services.json not found in any expected location');
 }
 
 export async function getServiceBinPath(fsAdapter, appPath, type, version, log = console.log) {
@@ -164,14 +179,26 @@ async function checkDirectoryHasExecutable(fsAdapter, dir, exeName, depth = 0) {
     const entries = result.entries || result; // Adaptador devuelve { entries: [...] }
     for (const entry of entries) {
       const entryName = typeof entry === 'string' ? entry : entry.entry;
+      const entryType = typeof entry === 'string' ? undefined : entry.type;
       const subPath = path.join(dir, entryName);
-      if (await fsAdapter.fileExists(subPath)) {
-        try {
-          await fsAdapter.readDir(subPath);
-          if (await checkDirectoryHasExecutable(fsAdapter, subPath, exeName, depth + 1)) return true;
-        } catch (e) {
-          // No es directorio
+      let isDirectory = false;
+      if (entryType === 'DIRECTORY') {
+        isDirectory = true;
+      } else if (entryType === 'FILE') {
+        isDirectory = false;
+      } else {
+        // No type info, check if exists and try readDir
+        if (await fsAdapter.fileExists(subPath)) {
+          try {
+            await fsAdapter.readDir(subPath);
+            isDirectory = true;
+          } catch (e) {
+            isDirectory = false;
+          }
         }
+      }
+      if (isDirectory) {
+        if (await checkDirectoryHasExecutable(fsAdapter, subPath, exeName, depth + 1)) return true;
       }
     }
   } catch (e) {}
@@ -232,10 +259,24 @@ export async function getAvailableVersions(fsAdapter, appPath, serviceType) {
           const dirs = [];
           for (const entry of entries) {
             const entryName = typeof entry === 'string' ? entry : entry.entry;
+            const entryType = typeof entry === 'string' ? undefined : entry.type;
             const fullPath = path.join(binPath, entryName);
             // Verificar si es directorio
-            try {
-              await fsAdapter.readDir(fullPath);
+            let isDirectory = false;
+            if (entryType === 'DIRECTORY') {
+              isDirectory = true;
+            } else if (entryType === 'FILE') {
+              isDirectory = false;
+            } else {
+              // No type info, try readDir
+              try {
+                await fsAdapter.readDir(fullPath);
+                isDirectory = true;
+              } catch (e) {
+                isDirectory = false;
+              }
+            }
+            if (isDirectory) {
               // Es directorio, verificar ejecutable
               if (exeName) {
                 if (await checkDirectoryHasExecutable(fsAdapter, fullPath, exeName, 0)) {
@@ -244,8 +285,6 @@ export async function getAvailableVersions(fsAdapter, appPath, serviceType) {
               } else {
                 dirs.push(entryName);
               }
-            } catch (e) {
-              // No es directorio, ignorar
             }
           }
           allVersions = [...allVersions, ...dirs];
@@ -285,7 +324,9 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
   log(`[DETECTOR] Apache: availableVersions=${JSON.stringify(availableApache)}, selected=${apacheVersion}`);
 
   if (apacheVersion) {
+    log(`[DEBUG] Checking Apache binPath for version ${apacheVersion}`);
     const binPath = await getServiceBinPath(fsAdapter, appPath, 'apache', apacheVersion, log);
+    log(`[DEBUG] Apache binPath result: ${binPath}`);
     const apacheBase = binPath && binPath.toLowerCase().endsWith('bin') ? path.dirname(binPath) : (binPath || path.join(appPath, 'bin', 'apache', apacheVersion));
     const phpBinPath = await getServiceBinPath(fsAdapter, appPath, 'php', phpVersion, log);
     const phpBase = phpBinPath && phpBinPath.toLowerCase().endsWith('bin') ? path.dirname(phpBinPath) : (phpBinPath || (phpVersion ? path.join(appPath, 'bin', 'php', phpVersion) : null));
@@ -351,7 +392,7 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
       }
     }
 
-    if (binPath !== null && phpBinPath !== null) {
+    if (binPath !== null) {
       services.push({
         id: 'apache',
         name: 'Apache',
@@ -359,12 +400,21 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
         version: apacheVersion,
         phpVersion: phpVersion,
         configs: filteredConfigs,
-        availableVersions: availableApache,
-        availablePhpVersions: availablePhp,
+        availableVersions: availableApache.map(v => ({
+          version: v,
+          installed: v === apacheVersion,
+          isCurrent: v === apacheVersion
+        })),
+        availablePhpVersions: availablePhp.map(v => ({
+          version: v,
+          installed: v === phpVersion,
+          isCurrent: v === phpVersion
+        })),
         isInstalled: true,
+        installedVersion: apacheVersion,
         specialCase: true,
         requiresPhp: true,
-        dependenciesReady: true,
+        dependenciesReady: phpBinPath !== null,
         port: getPortFromConfig('apache', 80)
       });
     }
@@ -377,8 +427,13 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
       name: 'PHP',
       type: 'php',
       version: phpVersion,
-      availableVersions: availablePhp,
+      availableVersions: availablePhp.map(v => ({
+        version: v,
+        installed: v === phpVersion,
+        isCurrent: v === phpVersion
+      })),
       isInstalled: binPath !== null,
+      installedVersion: binPath !== null ? phpVersion : null,
       requiresPhp: false,
       dependenciesReady: binPath !== null,
       port: null
@@ -431,8 +486,13 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
       type: 'mysql',
       version: mysqlVersion,
       configs: mysqlConfigs,
-      availableVersions: availableMysql,
+      availableVersions: availableMysql.map(v => ({
+        version: v,
+        installed: v === mysqlVersion,
+        isCurrent: v === mysqlVersion
+      })),
       isInstalled: binPath !== null,
+      installedVersion: binPath !== null ? mysqlVersion : null,
       port: getPortFromConfig('mysql', 3306)
     });
   }
@@ -463,8 +523,13 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
       type: 'nginx',
       version: nginxVersion,
       configs: filteredNginxConfigs,
-      availableVersions: availableNginx,
+      availableVersions: availableNginx.map(v => ({
+        version: v,
+        installed: v === nginxVersion,
+        isCurrent: v === nginxVersion
+      })),
       isInstalled: binPath !== null,
+      installedVersion: binPath !== null ? nginxVersion : null,
       requiresPhp: false,
       dependenciesReady: binPath !== null,
       port: getPortFromConfig('nginx', 80)
@@ -489,8 +554,13 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
       name: db.name,
       type: db.type,
       version,
-      availableVersions: available,
+      availableVersions: available.map(v => ({
+        version: v,
+        installed: v === version,
+        isCurrent: v === version
+      })),
       isInstalled: binPath !== null,
+      installedVersion: binPath !== null ? version : null,
       requiresPhp: false,
       dependenciesReady: binPath !== null,
       port: getPortFromConfig(db.type, db.port)
@@ -498,13 +568,15 @@ export async function detectServices({ fsAdapter, appPath, userConfig, appConfig
   }
 
   log(`[DETECTOR] ===== DETECT SERVICES FIN: ${services.length} servicios =====`);
+  log(`[DETECTOR] Services before filter:`, services.map(s => `${s.id}:${s.type}`));
   // Filtrar servicios que no son ejecutables (librerías o lenguajes)
   const filteredServices = services.filter(service => service.type !== 'language');
+  log(`[DETECTOR] Services after filter:`, filteredServices.map(s => `${s.id}:${s.type}`));
   return filteredServices;
 }
 
 export async function getAllServicesAvailable({ fsAdapter, appPath, userConfig = {}, log = () => {} }) {
-  log('[ALLSERVICES] ===== GET ALL SERVICES AVAILABLE INICIO =====');
+  log('[ALLSERVICES] ===== GET ALL SERVICES AVAILABLE INICIO ===== appPath:', appPath);
 
   // Load services configuration
   const servicesConfig = await loadServicesConfig(fsAdapter, appPath);
@@ -522,7 +594,7 @@ export async function getAllServicesAvailable({ fsAdapter, appPath, userConfig =
     appConfig,
     log
   });
-  log('[ALLSERVICES] detectServices completed, installedServices:', installedServices.length);
+  log('[ALLSERVICES] detectServices completed, installedServices:', installedServices.length, installedServices.map(s => `${s.id}:${s.isInstalled}`));
   
   // Create a map of installed services by id
   const installedMap = {};
@@ -545,14 +617,27 @@ export async function getAllServicesAvailable({ fsAdapter, appPath, userConfig =
     const installed = installedMap[service.id];
     const installedVersions = installedVersionsMap[service.id] || [];
     
-    // Get available versions for this service
-    const availableVersions = service.versions.map(v => ({
+    // Get available versions for this service - combine config versions with detected versions
+    const configVersions = service.versions.map(v => ({
       version: v.version,
       url: v.url,
       filename: v.filename,
       installed: installedVersions.includes(v.version),
       isCurrent: installed && installed.version === v.version
     }));
+    
+    // Add any detected versions that aren't in config
+    const detectedVersions = installedVersions
+      .filter(v => !service.versions.some(cv => cv.version === v))
+      .map(v => ({
+        version: v,
+        url: null,
+        filename: null,
+        installed: true,
+        isCurrent: installed && installed.version === v
+      }));
+    
+    const availableVersions = [...configVersions, ...detectedVersions];
     
     return {
       id: service.id,
@@ -565,7 +650,9 @@ export async function getAllServicesAvailable({ fsAdapter, appPath, userConfig =
       availableVersions,
       currentVersion: installed ? installed.version : null,
       installedVersion: installed ? installed.version : null,
+      version: installed ? installed.version : null,
       installStatus: !!installed,
+      isInstalled: !!installed,
       // Include additional fields from installed service
       ...(installed ? {
         configs: installed.configs,

@@ -23,7 +23,8 @@ import {
   AlertCircle,
   FileText,
   Code,
-  CheckCircle
+  CheckCircle,
+  Shield
 } from 'lucide-react';
 
 function ServicesView({ services, hiddenServices, processingServices = [], isBulkRunning, loading, onToggleVisibility, onStart, onStop, onStartAll, onStopAll, t, loadServices }) {
@@ -31,6 +32,8 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
   const [menuOpen, setMenuOpen] = useState(null);
   const [notification, setNotification] = useState(null);
   const [activeSubMenu, setActiveSubMenu] = useState(null); // 'version' or 'php'
+  const [mysqlRecoveryStatus, setMysqlRecoveryStatus] = useState(null);
+  const [isRecoveringMySQL, setIsRecoveringMySQL] = useState(false);
 
   // Helper function to shorten long version strings for the UI
   const formatVersion = (v) => {
@@ -68,6 +71,83 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
       console.error(e);
     }
   };
+  
+  // Función para consultar estado de recuperación MySQL
+  const checkMySQLRecoveryStatus = async () => {
+    try {
+      if (!window.webservAPI || typeof window.webservAPI.getMySQLRecoveryStatus !== 'function') {
+        console.warn('webservAPI.getMySQLRecoveryStatus no disponible');
+        setMysqlRecoveryStatus({ error: 'API no disponible', canRecover: false });
+        return { error: 'API no disponible', canRecover: false };
+      }
+
+      const status = await window.webservAPI.getMySQLRecoveryStatus();
+      setMysqlRecoveryStatus(status);
+      return status;
+    } catch (error) {
+      console.error('Error obteniendo estado de recuperación MySQL:', error);
+      setNotification({ type: 'error', message: 'Error consultando recuperación MySQL' });
+      setTimeout(() => setNotification(null), 4000);
+    }
+  };
+
+  // Función para ejecutar recuperación manual de MySQL
+  const runMySQLRecovery = async () => {
+    if (!confirm('¿Está seguro de ejecutar la recuperación automática de MySQL? Esto puede tomar varios minutos.')) {
+      return;
+    }
+
+    if (!window.webservAPI || typeof window.webservAPI.runMySQLRecovery !== 'function') {
+      setNotification({ type: 'error', message: 'Función de recuperación no disponible' });
+      setTimeout(() => setNotification(null), 4000);
+      return;
+    }
+
+    setIsRecoveringMySQL(true);
+    setNotification({ type: 'info', message: 'Iniciando recuperación de MySQL...' });
+
+    try {
+      const result = await window.webservAPI.runMySQLRecovery();
+      
+      if (result.success) {
+        setNotification({ 
+          type: 'success', 
+          message: `Recuperación completada. Estrategia: ${result.successfulStrategy || 'Desconocida'}` 
+        });
+        // Recargar servicios para ver el estado actualizado
+        loadServices();
+      } else {
+        setNotification({ 
+          type: 'error', 
+          message: `Recuperación fallida: ${result.error || 'Error desconocido'}` 
+        });
+      }
+      
+      // Actualizar estado de recuperación
+      await checkMySQLRecoveryStatus();
+      
+    } catch (error) {
+      console.error('Error en recuperación MySQL:', error);
+      setNotification({ type: 'error', message: 'Error ejecutando recuperación MySQL' });
+    } finally {
+      setIsRecoveringMySQL(false);
+      setTimeout(() => setNotification(null), 6000);
+    }
+  };
+
+  // Escuchar eventos de recuperación MySQL
+  React.useEffect(() => {
+    const handleMySQLRecoveryNeeded = (event) => {
+      console.log('Evento mysql-recovery-needed recibido:', event.detail);
+      // Solo activar recuperación si es para MySQL
+      if (event.detail.serviceName.toLowerCase().includes('mysql')) {
+        checkMySQLRecoveryStatus();
+      }
+    };
+
+    window.addEventListener('mysql-recovery-needed', handleMySQLRecoveryNeeded);
+    return () => window.removeEventListener('mysql-recovery-needed', handleMySQLRecoveryNeeded);
+  }, []);
   
   const visibleServices = Array.isArray(services) ? services.filter(s => !hiddenServices.includes(s.name) && !s.isLibrary) : [];
   
@@ -249,6 +329,16 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                               <FileText size={12} />
                               <span>{t.diagnosticLog || '?? Diagnóstico'}</span>
                             </button>
+                            <button 
+                              onClick={async () => { 
+                                await checkMySQLRecoveryStatus(); 
+                                setMenuOpen(null); 
+                              }} 
+                              className="w-full text-left px-3 py-1.5 text-xs text-app-text hover:bg-app-primary/10 hover:text-app-primary flex items-center space-x-2 transition-colors font-bold"
+                            >
+                              <Activity size={12} />
+                              <span>Estado Recuperación</span>
+                            </button>
                             <div className="h-px bg-app-border my-1"></div>
                           </>
                         )}
@@ -337,6 +427,31 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                 </div>
                 <div className="overflow-hidden flex-1">
                   <h3 className={`text-base font-black tracking-tight truncate uppercase italic transition-colors ${isRunning ? 'text-app-success' : (!service.isInstalled || depsMissing) ? 'text-app-danger' : isPortOccupied ? 'text-app-warning' : 'text-app-text'}`}>{service.name}</h3>
+                  {service.type === 'mysql' && mysqlRecoveryStatus && (
+                    <div className="flex items-center space-x-1 mt-1">
+                      <Shield size={10} className={`${
+                        mysqlRecoveryStatus.needsRecovery 
+                          ? 'text-app-danger' 
+                          : mysqlRecoveryStatus.lastRecovery 
+                            ? 'text-app-success' 
+                            : 'text-app-text-muted'
+                      }`} />
+                      <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                        mysqlRecoveryStatus.needsRecovery 
+                          ? 'text-app-danger' 
+                          : mysqlRecoveryStatus.lastRecovery 
+                            ? 'text-app-success' 
+                            : 'text-app-text-muted'
+                      }`}>
+                        {mysqlRecoveryStatus.needsRecovery 
+                          ? 'REQUIERE RECUPERACIÓN' 
+                          : mysqlRecoveryStatus.lastRecovery 
+                            ? `RECUPERADO ${new Date(mysqlRecoveryStatus.lastRecovery).toLocaleDateString()}` 
+                            : 'SIN RECUPERACIÓN'
+                        }
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center space-x-1.5">
                     <span className={`rounded-full transition-all duration-500 ${
                       isProcessing 
@@ -466,6 +581,19 @@ function ServicesView({ services, hiddenServices, processingServices = [], isBul
                 {service.type === 'mysql' && isRunning && !isProcessing && (
                   <button onClick={() => window.webservAPI.openDbTool()} className="w-full py-1.5 bg-app-warning/10 text-app-warning hover:bg-app-warning hover:text-white rounded-lg text-[10px] font-black border border-app-warning/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200">
                     <Database size={10} /><span>{t.openDb}</span>
+                  </button>
+                )}
+                {service.type === 'mysql' && !isRunning && !isProcessing && mysqlRecoveryStatus && (
+                  <button 
+                    onClick={runMySQLRecovery}
+                    disabled={isRecoveringMySQL}
+                    className="w-full py-1.5 bg-app-danger/10 text-app-danger hover:bg-app-danger hover:text-white rounded-lg text-[10px] font-black border border-app-danger/20 transition-all flex items-center justify-center space-x-2 uppercase tracking-widest animate-in fade-in zoom-in-95 duration-200 disabled:opacity-50"
+                  >
+                    {isRecoveringMySQL ? (
+                      <><RefreshCw size={10} className="animate-spin" /><span>RECUPERANDO...</span></>
+                    ) : (
+                      <><Activity size={10} /><span>RECUPERAR DB</span></>
+                    )}
                   </button>
                 )}
               </div>

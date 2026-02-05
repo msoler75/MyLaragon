@@ -1,5 +1,5 @@
 import http from 'http';
-import fs from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
@@ -8,92 +8,113 @@ import { detectServices, loadAppConfig, loadServicesConfig, getAllServicesAvaila
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const basePath = path.resolve(__dirname, '../../');
 
-console.log('[DEBUG] Starting server...');
-console.log('[DEBUG] basePath:', basePath);
+function logToFile(level, message) {
+  const logPath = path.resolve(basePath, 'app-debug.log');
+  const timestamp = new Date().toISOString();
+  const prefixedMessage = `[DEV-SERVER] ${timestamp} [${level}] ${message}\n`;
+  try {
+    fs.appendFileSync(logPath, prefixedMessage);
+  } catch (err) {
+    console.error('Error writing to dev-server log file:', err);
+  }
+}
+
+function logger(level, message) {
+  console.log(`[${level}] ${message}`);
+  logToFile(level, message);
+}
 
 // Capturar errores no manejados
 process.on('uncaughtException', (err) => {
-  console.error('[FATAL] uncaughtException:', err);
+  logger('FATAL', `uncaughtException: ${err}`);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[FATAL] unhandledRejection:', reason);
+  logger('FATAL', `unhandledRejection: ${reason}`);
   process.exit(1);
 });
 
 const nodeAdapter = {
   async readDir(dirPath) {
-    console.log('[ADAPTER] readDir called:', dirPath);
+    logger('ADAPTER', `readDir called: ${dirPath}`);
     try {
-      const entries = await fs.readdir(dirPath);
-      console.log('[ADAPTER] readdir returned', entries.length, 'entries');
+      const resolvedPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(basePath, dirPath);
+      logger('ADAPTER', `Resolved path for readdir: ${resolvedPath}`);
+      const entries = fs.readdirSync(resolvedPath);
+      logger('ADAPTER', `readdir returned ${entries.length} entries`);
       const result = [];
       
       for (const name of entries) {
-        const fullPath = path.join(dirPath, name);
-        const stats = await fs.stat(fullPath);
+        const fullPath = path.join(resolvedPath, name);
+        const stats = fs.statSync(fullPath);
         result.push({
           entry: name,
           type: stats.isDirectory() ? 'DIRECTORY' : 'FILE'
         });
       }
       
-      console.log('[ADAPTER] readDir result:', result.length, 'items');
+      logger('ADAPTER', `readDir result: ${result.length} items`);
       return { entries: result };
     } catch (err) {
       // Don't log ENOENT or ENOTDIR errors as they are expected during service detection
       if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') {
-        console.error('[ADAPTER] readDir error:', err);
+        logger('ERROR', `[ADAPTER] readDir error: ${err}`);
       }
       throw err;
     }
   },
 
   async fileExists(filePath) {
-    console.log('[ADAPTER] fileExists called:', filePath);
+    logger('ADAPTER', `fileExists called: ${filePath}`);
     try {
-      await fs.access(filePath);
-      console.log('[ADAPTER] fileExists: EXISTS');
-      return { exists: true };
+      filePath = filePath.replace(/\\/g, '/');
+      const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(basePath, filePath);
+      logger('ADAPTER', `Resolved path for exists: ${resolvedPath}`);
+      const exists = fs.existsSync(resolvedPath);
+      logger('ADAPTER', `fileExists: ${exists ? 'EXISTS' : 'NOT EXISTS'}`);
+      return { exists };
     } catch {
-      console.log('[ADAPTER] fileExists: NOT EXISTS');
+      logger('ADAPTER', 'fileExists: NOT EXISTS');
       return { exists: false };
     }
   },
 
   async readFile(filePath) {
-    console.log('[ADAPTER] readFile called:', filePath);
+    logger('ADAPTER', `readFile called: ${filePath}`);
     try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      console.log('[ADAPTER] readFile success:', content.length, 'bytes');
+      filePath = filePath.replace(/\\/g, '/');
+      const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(basePath, filePath);
+      logger('ADAPTER', `Resolved path: ${resolvedPath}`);
+      const content = fs.readFileSync(resolvedPath, 'utf-8');
+      logger('ADAPTER', `readFile success: ${content.length} bytes`);
       return content;
     } catch (err) {
       // Don't log ENOENT errors as they are expected during file operations
       if (err.code !== 'ENOENT') {
-        console.error('[ADAPTER] readFile error:', err);
+        logger('ERROR', `[ADAPTER] readFile error: ${err}`);
       }
       throw err;
     }
   },
 
   async writeFile(filePath, content) {
-    console.log('[ADAPTER] writeFile called:', filePath);
+    logger('ADAPTER', `writeFile called: ${filePath}`);
     try {
-      await fs.writeFile(filePath, content, { flag: 'a' }); // append mode
-      console.log('[ADAPTER] writeFile success');
+      fs.writeFileSync(filePath, content, { flag: 'a' }); // append mode
+      logger('ADAPTER', 'writeFile success');
       return { success: true };
     } catch (err) {
-      console.error('[ADAPTER] writeFile error:', err);
+      logger('ERROR', `[ADAPTER] writeFile error: ${err}`);
       throw err;
     }
   },
 
   async execCommand(command) {
-    console.log('[ADAPTER] execCommand called:', command);
+    logger('ADAPTER', `execCommand called: ${command}`);
     return new Promise((resolve) => {
       exec(command, { cwd: basePath }, (error, stdout, stderr) => {
-        console.log('[ADAPTER] execCommand result:', { error: error?.message, stdout: stdout?.slice(0, 100), stderr: stderr?.slice(0, 100) });
+        logger('ADAPTER', `execCommand result: ${JSON.stringify({ error: error?.message, stdout: stdout?.slice(0, 100), stderr: stderr?.slice(0, 100) })}`);
         resolve({
           exitCode: error ? error.code || 1 : 0,
           stdout: stdout || '',
@@ -108,7 +129,7 @@ const nodeAdapter = {
 /////////////////// HTTP SERVER ///////////////////
 
 const server = http.createServer(async (req, res) => {
-  console.log('[REQUEST]', req.method, req.url);
+  logger('REQUEST', `${req.method} ${req.url}`);
   
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -117,7 +138,7 @@ const server = http.createServer(async (req, res) => {
   
   // Handle OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
-    console.log('[REQUEST] OPTIONS preflight response');
+    logger('REQUEST', 'OPTIONS preflight response');
     res.writeHead(204);
     res.end();
     return;
@@ -125,48 +146,51 @@ const server = http.createServer(async (req, res) => {
   
   // Health check (support both GET and HEAD for wait-on)
   if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
-    console.log('[REQUEST] Handling /health');
+    logger('REQUEST', 'Handling /health');
     res.writeHead(200, { 'Content-Type': 'application/json' });
     if (req.method === 'GET') {
       res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
     } else {
       res.end(); // HEAD requests don't send body
     }
-    console.log('[REQUEST] /health response sent');
+    logger('REQUEST', '/health response sent');
     return;
   }
   
   // Read dir endpoint
   if (req.url === '/api/read-dir' && req.method === 'POST') {
-    console.log('[REQUEST] Handling /api/read-dir');
+    logger('REQUEST', 'Handling /api/read-dir');
     let body = '';
     
     req.on('data', chunk => {
-      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
+      logger('REQUEST', `Received chunk: ${chunk.length} bytes`);
       body += chunk.toString();
     });
     
     req.on('end', async () => {
+      let dirPath = null;
       try {
-        console.log('[REQUEST] Body complete:', body);
-        const { path: dirPath } = JSON.parse(body);
-        console.log('[REQUEST] Parsed dirPath:', dirPath);
+        logger('REQUEST', `Body complete: ${body}`);
+        const parsed = JSON.parse(body);
+        dirPath = parsed.path;
+        logger('REQUEST', `Parsed dirPath: ${dirPath}`);
         
         const result = await nodeAdapter.readDir(dirPath);
-        console.log('[REQUEST] Adapter returned:', result);
+        logger('REQUEST', `Adapter returned: ${JSON.stringify(result)}`);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
-        console.log('[REQUEST] /api/read-dir response sent');
+        logger('REQUEST', '/api/read-dir response sent');
       } catch (err) {
-        console.error('[REQUEST] /api/read-dir error:', err);
+        logger('ERROR', `/api/read-dir error for path "${dirPath}": ${err.message}`);
+        logger('ERROR', `Full error: ${err.stack}`);
         res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
+        res.end(JSON.stringify({ error: err.message, path: dirPath }));
       }
     });
     
     req.on('error', (err) => {
-      console.error('[REQUEST] Request error:', err);
+      logger('ERROR', `Request error: ${err}`);
     });
     
     return;
@@ -174,35 +198,117 @@ const server = http.createServer(async (req, res) => {
   
   // File exists endpoint
   if (req.url === '/api/file-exists' && req.method === 'POST') {
-    console.log('[REQUEST] Handling /api/file-exists');
+    logger('REQUEST', 'Handling /api/file-exists');
     let body = '';
     
     req.on('data', chunk => {
-      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
+      logger('REQUEST', `Received chunk: ${chunk.length} bytes`);
       body += chunk.toString();
     });
     
     req.on('end', async () => {
       try {
-        console.log('[REQUEST] Body complete:', body);
+        logger('REQUEST', `Body complete: ${body}`);
         const { path: filePath } = JSON.parse(body);
-        console.log('[REQUEST] Parsed filePath:', filePath);
+        logger('REQUEST', `Parsed filePath: ${filePath}`);
         
         const result = await nodeAdapter.fileExists(filePath);
-        console.log('[REQUEST] Adapter returned:', result);
+        logger('REQUEST', `Adapter returned: ${JSON.stringify(result)}`);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
-        console.log('[REQUEST] /api/file-exists response sent');
+        logger('REQUEST', '/api/file-exists response sent');
       } catch (err) {
-        console.error('[REQUEST] /api/file-exists error:', err);
+        logger('ERROR', `/api/file-exists error: ${err}`);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
     });
     
     req.on('error', (err) => {
-      console.error('[REQUEST] Request error:', err);
+      logger('ERROR', `Request error: ${err}`);
+    });
+    
+    return;
+  }
+  
+  // Directory exists endpoint
+  if (req.url === '/api/dir-exists' && req.method === 'POST') {
+    logger('REQUEST', 'Handling /api/dir-exists');
+    let body = '';
+    
+    req.on('data', chunk => {
+      logger('REQUEST', `Received chunk: ${chunk.length} bytes`);
+      body += chunk.toString();
+    });
+    
+    req.on('end', async () => {
+      try {
+        logger('REQUEST', `Body complete: ${body}`);
+        const { path: dirPath } = JSON.parse(body);
+        logger('REQUEST', `Parsed dirPath: ${dirPath}`);
+        
+        const resolvedPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(basePath, dirPath);
+        logger('REQUEST', `Resolved path: ${resolvedPath}`);
+        
+        const exists = fs.existsSync(resolvedPath);
+        logger('REQUEST', `dirExists: ${exists ? 'EXISTS' : 'NOT EXISTS'}`);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ exists }));
+        logger('REQUEST', '/api/dir-exists response sent');
+      } catch (err) {
+        logger('ERROR', `/api/dir-exists error: ${err}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    
+    req.on('error', (err) => {
+      logger('ERROR', `Request error: ${err}`);
+    });
+    
+    return;
+  }
+  
+  // Create directory endpoint
+  if (req.url === '/api/create-dir' && req.method === 'POST') {
+    logger('REQUEST', 'Handling /api/create-dir');
+    let body = '';
+    
+    req.on('data', chunk => {
+      logger('REQUEST', `Received chunk: ${chunk.length} bytes`);
+      body += chunk.toString();
+    });
+    
+    req.on('end', async () => {
+      try {
+        logger('REQUEST', `Body complete: ${body}`);
+        const { path: dirPath, recursive } = JSON.parse(body);
+        logger('REQUEST', `Parsed dirPath: ${dirPath}, recursive: ${recursive}`);
+        
+        const resolvedPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(basePath, dirPath);
+        logger('REQUEST', `Resolved path: ${resolvedPath}`);
+        
+        if (recursive) {
+          fs.mkdirSync(resolvedPath, { recursive: true });
+        } else {
+          fs.mkdirSync(resolvedPath);
+        }
+        logger('REQUEST', 'Directory created successfully');
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+        logger('REQUEST', '/api/create-dir response sent');
+      } catch (err) {
+        logger('ERROR', `/api/create-dir error: ${err}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    
+    req.on('error', (err) => {
+      logger('ERROR', `Request error: ${err}`);
     });
     
     return;
@@ -210,35 +316,39 @@ const server = http.createServer(async (req, res) => {
   
   // Read file endpoint
   if (req.url === '/api/read-file' && req.method === 'POST') {
-    console.log('[REQUEST] Handling /api/read-file');
+    logger('REQUEST', 'Handling /api/read-file');
     let body = '';
     
     req.on('data', chunk => {
-      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
+      logger('REQUEST', `Received chunk: ${chunk.length} bytes`);
       body += chunk.toString();
     });
     
     req.on('end', async () => {
       try {
-        console.log('[REQUEST] Body complete:', body);
-        const { path: filePath } = JSON.parse(body);
-        console.log('[REQUEST] Parsed filePath:', filePath);
+        logger('REQUEST', `Body complete: ${body}`);
+        let { path: filePath } = JSON.parse(body);
+        logger('REQUEST', `Parsed filePath: ${filePath}`);
         
-        const content = await nodeAdapter.readFile(filePath);
-        console.log('[REQUEST] Read', content.length, 'bytes');
+        filePath = filePath.replace(/\\/g, '/');
+        const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(basePath, filePath);
+        logger('REQUEST', `Resolved path: ${resolvedPath}`);
         
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end(content);
-        console.log('[REQUEST] /api/read-file response sent');
+        const content = fs.readFileSync(resolvedPath, 'utf-8');
+        logger('REQUEST', `Read ${content.length} bytes`);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ content }));
+        logger('REQUEST', '/api/read-file response sent');
       } catch (err) {
-        console.error('[REQUEST] /api/read-file error:', err);
+        logger('ERROR', `/api/read-file error: ${err}`);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
     });
     
     req.on('error', (err) => {
-      console.error('[REQUEST] Request error:', err);
+      logger('ERROR', `Request error: ${err}`);
     });
     
     return;
@@ -246,19 +356,19 @@ const server = http.createServer(async (req, res) => {
   
   // Write log endpoint
   if (req.url === '/api/write-log' && req.method === 'POST') {
-    console.log('[REQUEST] Handling /api/write-log');
+    logger('REQUEST', 'Handling /api/write-log');
     let body = '';
     
     req.on('data', chunk => {
-      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
+      logger('REQUEST', `Received chunk: ${chunk.length} bytes`);
       body += chunk.toString();
     });
     
     req.on('end', async () => {
       try {
-        console.log('[REQUEST] Body complete:', body);
+        logger('REQUEST', `Body complete: ${body}`);
         const { message } = JSON.parse(body);
-        console.log('[REQUEST] Log message:', message);
+        logger('REQUEST', `Log message: ${message}`);
         
         const logPath = path.join(process.cwd(), 'app-debug.log');
         const timestamp = new Date().toISOString();
@@ -268,16 +378,16 @@ const server = http.createServer(async (req, res) => {
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
-        console.log('[REQUEST] /api/write-log response sent');
+        logger('REQUEST', '/api/write-log response sent');
       } catch (err) {
-        console.error('[REQUEST] /api/write-log error:', err);
+        logger('ERROR', `/api/write-log error: ${err}`);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
     });
     
     req.on('error', (err) => {
-      console.error('[REQUEST] Request error:', err);
+      logger('ERROR', `Request error: ${err}`);
     });
     
     return;
@@ -285,34 +395,34 @@ const server = http.createServer(async (req, res) => {
   
   // Exec command endpoint
   if (req.url === '/api/exec-command' && req.method === 'POST') {
-    console.log('[REQUEST] Handling /api/exec-command');
+    logger('REQUEST', 'Handling /api/exec-command');
     let body = '';
     
     req.on('data', chunk => {
-      console.log('[REQUEST] Received chunk:', chunk.length, 'bytes');
+      logger('REQUEST', `Received chunk: ${chunk.length} bytes`);
       body += chunk.toString();
     });
     
     req.on('end', async () => {
       try {
-        console.log('[REQUEST] Body complete:', body);
+        logger('REQUEST', `Body complete: ${body}`);
         const { command } = JSON.parse(body);
-        console.log('[REQUEST] Command:', command);
+        logger('REQUEST', `Command: ${command}`);
         
         const result = await nodeAdapter.execCommand(command);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
-        console.log('[REQUEST] /api/exec-command response sent');
+        logger('REQUEST', '/api/exec-command response sent');
       } catch (err) {
-        console.error('[REQUEST] /api/exec-command error:', err);
+        logger('ERROR', `/api/exec-command error: ${err}`);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
     });
     
     req.on('error', (err) => {
-      console.error('[REQUEST] Request error:', err);
+      logger('ERROR', `Request error: ${err}`);
     });
     
     return;
@@ -322,26 +432,23 @@ const server = http.createServer(async (req, res) => {
   // Get all services information (installed, available, status)
   // PARA DEV: Para comprobar este método se puede usar node test-get-services.js  (y así no arrancar todo el servidor dev)
   if (req.url === '/api/get-services' && req.method === 'GET') {
-    console.log('[REQUEST] Handling /api/get-services');
+    logger('REQUEST', 'Handling /api/get-services');
     
     try {
-      console.log('[REQUEST] Calling getAllServicesAvailable with appPath:', basePath);
+      logger('REQUEST', `Calling getAllServicesAvailable with appPath: ${basePath}`);
       
       // Debug getAvailableVersions
       const phpVersions = await getAvailableVersions(nodeAdapter, basePath, 'php');
-      console.log('[DEBUG] getAvailableVersions for php:', phpVersions);
+      logger('DEBUG', `getAvailableVersions for php: ${JSON.stringify(phpVersions)}`);
       
       const result = await getAllServicesAvailable({
         fsAdapter: nodeAdapter,
         appPath: basePath,
         userConfig: {},
-        log: console.log
+        log: (msg) => logger('DEBUG', msg)
       });
       
-      console.log('[REQUEST] getAllServicesAvailable returned', result.length, 'services');
-      result.forEach(s => {
-        console.log(`[REQUEST] Service ${s.name}: installed=${s.installedVersion}, available=${JSON.stringify(s.availableVersions)}`);
-      });
+      logger('REQUEST', `getAllServicesAvailable returned ${result.length} services`);
       
       // Simulate shim processing: add status checks
       for (const service of result) {
@@ -353,7 +460,7 @@ const server = http.createServer(async (req, res) => {
           service.canStart = service.installedVersion && !service.running;
           service.canStop = service.running;
         } catch (e) {
-          console.warn(`[REQUEST] Error checking status for ${service.name}:`, e.message);
+          logger('WARN', `Error checking status for ${service.name}: ${e.message}`);
           service.running = false;
           service.status = 'unknown';
         }
@@ -368,9 +475,9 @@ const server = http.createServer(async (req, res) => {
       
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(response));
-      console.log('[REQUEST] /api/get-services response sent with', result.length, 'total services');
+      logger('REQUEST', `/api/get-services response sent with ${result.length} total services`);
     } catch (err) {
-      console.error('[REQUEST] /api/get-services error:', err);
+      logger('ERROR', `/api/get-services error: ${err}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
@@ -379,27 +486,27 @@ const server = http.createServer(async (req, res) => {
   }
   
   // 404
-  console.log('[REQUEST] 404 Not Found');
+  logger('REQUEST', '404 Not Found');
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
 server.on('error', (err) => {
-  console.error('[SERVER] Server error:', err);
+  logger('ERROR', `Server error: ${err}`);
   process.exit(1);
 });
 
 server.on('connection', (socket) => {
-  console.log('[SERVER] New connection from', socket.remoteAddress);
+  logger('SERVER', `New connection from ${socket.remoteAddress}`);
   
   socket.on('error', (err) => {
-    console.error('[SOCKET] Socket error:', err);
+    logger('ERROR', `Socket error: ${err}`);
   });
 });
 
 const PORT = 5174;
 server.listen(PORT, () => {
-  console.log(`[SERVER] 🚀 Debug API Server running on http://localhost:${PORT}`);
-  console.log('[SERVER] Endpoints: /health, /api/read-dir, /api/file-exists, /api/read-file, /api/write-log, /api/exec-command, /api/get-services');
-  console.log('[SERVER] Ready to accept requests');
+  logger('SERVER', `🚀 Debug API Server running on http://localhost:${PORT}`);
+  logger('SERVER', 'Endpoints: /health, /api/read-dir, /api/file-exists, /api/dir-exists, /api/create-dir, /api/read-file, /api/write-log, /api/exec-command, /api/get-services');
+  logger('SERVER', 'Ready to accept requests');
 });

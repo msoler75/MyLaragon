@@ -1,10 +1,32 @@
 # WebServDev - Copilot Instructions
 
+## 🎯 Sistema de Base Universal
+Este proyecto sigue los **[Principios Universales de Desarrollo de Software](./universal-copilot-base.md)** que garantizan calidad profesional.
+
+### Skills Activas del Sistema
+Tienes acceso a **22 skills especializadas** incluyendo las 5 críticas:
+- `logging-best-practices` - Logging estratégico y debugging autónomo
+- `tdd` - Testing realista sin trampas
+- `clean-code-principles` - DRY, SOLID, legibilidad
+- `systematic-debugging` - Debugging sistemático
+- `refactor` - Eliminación de duplicación proactiva
+
+**Consulta la [Guía de Skills](./skills-guide.md)** para conocer todas las capacidades disponibles.
+
+### Checklist de Calidad (Pre-Commit)
+Antes de cada cambio, verifica los **[10 Principios Fundamentales](./universal-copilot-base.md#-checklist-para-cualquier-tarea)**:
+✓ DRY ✓ SSOT ✓ Tests realistas ✓ Dev=Prod ✓ Logs informativos ✓ Config dinámica ✓ Docs actualizadas ✓ Verificado ✓ Legible ✓ Auto-debuggable
+
+---
+
 ## Perfil del Proyecto
 WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servidores locales en Windows. Utiliza React + Tailwind CSS 4 en el frontend.
 
 ## Documentación técnica del proyecto
-- Consulta todos los archivos con extensión .md
+- **Principios Universales:** [universal-copilot-base.md](./universal-copilot-base.md) ⭐ LEER PRIMERO
+- **Skills Disponibles:** [skills-guide.md](./skills-guide.md)
+- **Skills Descubiertas:** [DISCOVERED_SKILLS.md](./DISCOVERED_SKILLS.md)
+- Consulta todos los archivos con extensión .md en el proyecto
 
 ## Entorno de desarrollo
 - Windows 11
@@ -20,62 +42,60 @@ WebServDev es una plataforma híbrida (Neutralino/Electron) para gestionar servi
 - **fs-adapter.js**: Detecta modo (dev/prod) y usa fetch() o Neutralino.filesystem según corresponda.
 
 ## Reglas de Oro (No Ignorar)
-0. **DRY extremo**
+
+> **💡 Nota:** Este proyecto aplica los [10 Principios Universales](./universal-copilot-base.md). Aquí se detallan las reglas específicas del proyecto que complementan esos principios.
+
+### Reglas Específicas del Proyecto
+
+0. **DRY extremo** (ver [Principio 1](./universal-copilot-base.md))
    - No debe haber funcionalidades duplicadas en toda la app.
-   - Si encuentras código similar o idéntico en dos lugares, refactoriza para crear una función/utilidad/componente/servicio compartido.
+   - Usa la skill `refactor` para eliminar duplicación proactivamente.
 
-1. **Política de Fuente Única de Verdad (Single Source of Truth)**:
-   - NUNCA edites archivos dentro de `neutralino/www/`. Son volátiles y se generan por el script de sincronización.
-   - La fuente de verdad absoluta está en `src/neutralino/` (Shim, Services, Bootstrap).
-   - El script `scripts/sync-resources.js` sincroniza estos archivos hacia `www/` realizando copias físicas para compatibilidad con Windows.
+1. **Política de Fuente Única de Verdad** (ver [Principio 2](./universal-copilot-base.md))
+   - NUNCA edites archivos dentro de `neutralino/www/`. Son volátiles.
+   - La fuente de verdad: `src/neutralino/` (Shim, Services, Bootstrap).
+   - Sincronización: `scripts/sync-resources.js`
 
-2. **Manejo de Rutas**:
-   - Usa `basePath` (desde `app.ini` o config) para localizar binarios en `/bin`.
-   - Evita rutas absolutas hardcoded; prefiere resolverlas dinámicamente usando el contexto del Shim o el proceso principal.
+2. **Manejo de Rutas** (ver [Principio 9](./universal-copilot-base.md))
+   - Usa `basePath` (desde `app.ini`) para localizar binarios en `/bin`.
+   - Evita rutas absolutas hardcoded.
 
-3. **Sistema de Logs**:
-   - No implementes sistemas de log paralelos. Usa `console.log/warn/error`.
-   - El Shim intercepta estas llamadas para:
-     a) Escribir en `app-debug.log` (modo append).
-     b) Enviar al canal de depuración nativo.
-     c) Notificar a la UI (`LogsView.jsx`) vía `window.__neutralino_push_log`.
+3. **Sistema de Logs** (ver [Principio 8](./universal-copilot-base.md))
+   - Usa `console.log/warn/error` (skill: `logging-best-practices`).
+   - El Shim intercepta y escribe en `app-debug.log`.
+   - Notifica a UI (`LogsView.jsx`) vía `window.__neutralino_push_log`.
 
-4. **Autonomía y Resolución vía Logs**:
-   - Los logs son la fuente primaria de consulta. Antes de pedir ayuda o aclaraciones al usuario tras una ejecución, revisa `app-debug.log` o la salida de terminal.
-   - Debes ser capaz de identificar qué pasos fallaron y por qué (ej. falta de permisos, binario corrupto, puerto ocupado) a través de los logs.
-   - **Instrumentación Proactiva**: Si los logs existentes no son lo suficientemente descriptivos para resolver un bug, es TU responsabilidad inyectar nuevos mensajes de log (`console.log/warn/error`) con información técnica precisa (variables de entorno, rutas resueltas, códigos de error crudos) para triangular el origen del problema.
-   - Corrige los errores detectados de forma autónoma; solo contacta al usuario si el problema requiere una decisión de negocio o una intervención física externa.
+4. **Autonomía y Resolución** (ver [Principio 3](./universal-copilot-base.md))
+   - Lee `app-debug.log` ANTES de preguntar al usuario.
+   - Usa skill `systematic-debugging` para resolver bugs.
+   - Inyecta logs si falta información (skill: `logging-best-practices`).
 
-5. **Integración de Servicios**:
-   - La definición de servicios instalables está hardcodeada en `src/neutralino/lib/services-detector.js`.
-   - La detección de binarios debe seguir el patrón de búsqueda en `bin/<tipo>/<versión>/<ejecutable>`.
+5. **Integración de Servicios**
+   - Definiciones: `src/neutralino/lib/services-detector.js`
+   - Patrón de búsqueda: `bin/<tipo>/<versión>/<ejecutable>`
 
-6. **Tests realistas**
-   - Las pruebas unitarias deben de probar partes reales del sistema, no mocks maquillados.
-   - Si los test se cumplen, la app se debe comportar igual en producción.
-   - Los tests nunca NUNCA NUNCA JAMÁS deben hacer "trampas" para validarses (ej. mockear la existencia de binarios, respuestas falsas de ejecución de comandos).
-   - Se deben escribir tantos test como hagan falta para cubrir los flujos críticos (instalación, detección, ejecución de comandos, logs).
+6. **Tests realistas** (ver [Principio 6](./universal-copilot-base.md))
+   - Usa skill `tdd` para ciclo Red-Green-Refactor.
+   - NUNCA mockear binarios o respuestas falsas.
+   - Cobertura obligatoria: instalación, detección, comandos, logs.
 
-7. **Nunca supongas**
-   - Nunca digas 'Esto debería funcionar' o 'Esto ya debería estar bien'. Compruébalo. Para eso usa las herramientas de logging y testing.
-   - Si algo no está claro, investiga o pregunta. No des nada por sentado.
-   - Puedes investigar en app-debug.log para ver los mensajes de log generados en ejecuciones y así comprobar estado de la aplicación y sus funcionalidades.
+7. **Nunca supongas** (ver [Principio 4](./universal-copilot-base.md))
+   - Usa `systematic-debugging` skill.
+   - Verifica en `app-debug.log` antes de asumir.
 
-8. **Nunca molestes ni delegues**
-   - Evita en lo posible molestar al usuario si tú puedes arreglártelas solo.
-   - Nunca pidas al usuario que ejecute un comando o compruebe algo ¡si tú lo puedes hacer! 
-   - Recuerda consultar los logs para verificar estado de la app.
-   - Solo pide ayuda al usuario cuando no quede otro remedio.
+8. **Nunca molestes** (ver [Principio 5](./universal-copilot-base.md))
+   - Resuelve autónomamente usando logs y tools.
+   - Pregunta solo si necesitas decisión de negocio.
 
-9. **Consistencia entre Dev y Prod**
-   - El comportamiento en modo desarrollo (dev-server + vite) debe ser idéntico al modo producción (Neutralino runtime).
-   - Si encuentras discrepancias, refactoriza para unificar la lógica en `lib/` y asegúrate de que ambos modos usen las mismas funciones.
-   - Minimizar la brecha entre dev y prod es crucial para evitar "works on my machine" bugs.
+9. **Consistencia Dev/Prod** (ver [Principio 7](./universal-copilot-base.md))
+   - Dev (dev-server + vite) = Prod (Neutralino).
+   - Lógica unificada en `lib/`.
 
 10. **dev-server.js**
-    - PARA PROBAR dev-server.js en ejecución en background, usa la task configurada para vscode.
-    - *Nunca* ejecutes node dev-server.js directamente en la terminal, ya que bloqueará la terminal y evitará ejecutar otros comandos (tests, health checks) en paralelo.
-    - Para comprobar el método /api/get-services, ejecuta "node test-get-services.js" en la terminal. (y así no arrancar todo el servidor dev)
+    - Usa task de VSCode (background).
+    - Test rápido: `node test-get-services.js`
+
+11. **Vistas**
 
 11. **Vistas**
 
@@ -124,7 +144,6 @@ Asistes a usuarios que buscan construir u optimizar un programa de construcción
 - Ofrece siempre múltiples ejemplos concretos de cómo podría ser dicha entrada para cualquier pregunta realizada.
 - Nunca hagas más de una pregunta a la vez y espera siempre a que el usuario responda antes de hacer la siguiente.
 ## </constraints>
-
 ## <goals>
 - Guiar al usuario en la identificación y articulación de objetivos de alto impacto relevantes para su proyecto de construcción específico, nicho y audiencia.
 - Construir un plan de productividad personalizado y accionable combinando metodologías probadas con herramientas de vanguardia.

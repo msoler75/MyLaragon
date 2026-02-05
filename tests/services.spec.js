@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { detectServices, loadAppConfig, clearLogsFile, getServiceBinPath } from '../src/neutralino/lib/services-detector.js';
+import { getAllServicesAvailable, loadAppConfig, clearLogsFile, getServiceBinPath } from '../src/neutralino/lib/services-detector.js';
 import { createNodeFilesystemAdapter } from '../src/neutralino/lib/fs-adapter.js';
 import { installFromZip } from '../src/neutralino/lib/service-installer.js';
 import { execFileSync } from 'node:child_process';
@@ -18,6 +18,13 @@ function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
 }
 
+function copyServicesJson(destDir) {
+  const srcPath = path.join(process.cwd(), 'src', 'neutralino', 'services.json');
+  const destPath = path.join(destDir, 'neutralino', 'services.json');
+  ensureDir(path.dirname(destPath));
+  fs.copyFileSync(srcPath, destPath);
+}
+
 describe('Service detection (filesystem-based)', () => {
   let tmpDir;
   let userConfig;
@@ -25,6 +32,7 @@ describe('Service detection (filesystem-based)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webservdev-test-'));
+    copyServicesJson(tmpDir);
     fsAdapter = createNodeFilesystemAdapter();
     userConfig = {
       appPath: tmpDir,
@@ -45,11 +53,11 @@ describe('Service detection (filesystem-based)', () => {
 
   it('marca Apache como no instalado cuando falta el ejecutable', async () => {
     writeIni(tmpDir, `[apache]\nversion=2.4.0`);
-    const appConfig = await await loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig, log: noop });
-    const apache = services.find(s => s.type === 'apache');
-  assert.ok(apache);
-  assert.equal(apache.isInstalled, false);
+    const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig, log: noop });
+    const apache = services.find(s => s.id === 'apache');
+    assert.ok(apache);
+    assert.equal(apache.isInstalled, false);
   });
 
   it('detecta Apache instalado cuando existe httpd.exe', async () => {
@@ -58,12 +66,12 @@ describe('Service detection (filesystem-based)', () => {
     ensureDir(apacheBin);
     fs.writeFileSync(path.join(apacheBin, 'httpd.exe'), '');
 
-    const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const appConfig = await loadAppConfig(fsAdapter, tmpDir, console.log);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig, log: console.log });
+    const apache = services.find(s => s.id === 'apache');
   assert.ok(apache);
   assert.equal(apache.isInstalled, true);
-  assert.ok(apache.availableVersions.includes('2.4.0'));
+  assert.ok(apache.availableVersions.some(v => v.version === '2.4.0'));
   });
 
   it('detecta Apache en neutralino/bin con carpetas anidadas', async () => {
@@ -77,13 +85,13 @@ describe('Service detection (filesystem-based)', () => {
     fs.writeFileSync(path.join(phpDeepBin, 'php8apache2_4.dll'), '');
 
     const appConfig = await loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig, log: noop });
+    const apache = services.find(s => s.id === 'apache');
 
     assert.ok(apache);
     assert.equal(apache.isInstalled, true);
     assert.equal(apache.dependenciesReady, true);
-    assert.ok(apache.availableVersions.includes('2.4.0'));
+    assert.ok(apache.availableVersions.some(v => v.version === '2.4.0'));
   });
 
   it('pasa de instalado a no instalado tras eliminar la carpeta (simula desinstalación)', async () => {
@@ -93,16 +101,16 @@ describe('Service detection (filesystem-based)', () => {
     fs.writeFileSync(path.join(apacheBin, 'httpd.exe'), '');
 
     let cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
-    let services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    let apache = services.find(s => s.type === 'apache');
+    let services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    let apache = services.find(s => s.id === 'apache');
     assert.ok(apache.isInstalled);
 
     // "Desinstalar": borrar la carpeta
     fs.rmSync(apacheBin, { recursive: true, force: true });
 
     cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
-    services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    apache = services.find(s => s.type === 'apache');
+    services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    apache = services.find(s => s.id === 'apache');
     assert.equal(apache.isInstalled, false);
   });
 
@@ -143,12 +151,12 @@ describe('Service detection (filesystem-based)', () => {
     const mariadbBin = path.join(tmpDir, 'bin', 'mariadb', '10.6');
     ensureDir(mariadbBin);
     fs.writeFileSync(path.join(mariadbBin, 'mysqld.exe'), '');
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const mysql = services.find(s => s.type === 'mysql');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const mysql = services.find(s => s.id === 'mysql');
   assert.ok(mysql);
   assert.equal(mysql.isInstalled, true);
-  assert.ok(mysql.availableVersions.includes('10.6'));
+  assert.ok(mysql.availableVersions.some(v => v.version === '10.6'));
   });
 
   it('ordena versiones de forma descendente', async () => {
@@ -158,10 +166,10 @@ describe('Service detection (filesystem-based)', () => {
       ensureDir(path.join(base, v));
       fs.writeFileSync(path.join(base, v, 'httpd.exe'), '');
     });
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
-  assert.deepEqual(apache.availableVersions, ['2.4.59', '2.4.54', '2.4.48']);
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
+    assert.deepEqual(apache.availableVersions.map(v => v.version), ['2.4.66', '2.4.59', '2.4.54', '2.4.48']);
   });
 
   it('documentRoot usa projectsPath cuando no hay override', async () => {
@@ -169,9 +177,9 @@ describe('Service detection (filesystem-based)', () => {
     const apacheBin = path.join(tmpDir, 'bin', 'apache', '2.4.0');
     ensureDir(apacheBin);
     fs.writeFileSync(path.join(apacheBin, 'httpd.exe'), '');
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
     const docRootConfig = apache.configs.find(c => c.label === 'OPEN_DOCROOT');
   assert.equal(docRootConfig.path, userConfig.projectsPath);
   });
@@ -181,9 +189,9 @@ describe('Service detection (filesystem-based)', () => {
     const apacheBin = path.join(tmpDir, 'bin', 'apache', '2.4.0');
     ensureDir(apacheBin);
     fs.writeFileSync(path.join(apacheBin, 'httpd.exe'), '');
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
     assert.ok(apache.isInstalled);
     assert.equal(apache.dependenciesReady, false);
   });
@@ -197,9 +205,9 @@ describe('Service detection (filesystem-based)', () => {
     ensureDir(phpBin);
     fs.writeFileSync(path.join(phpBin, 'php.exe'), '');
     fs.writeFileSync(path.join(phpBin, 'php8apache2_4.dll'), '');
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
     assert.ok(apache.isInstalled);
     assert.equal(apache.dependenciesReady, true);
   });
@@ -214,9 +222,9 @@ describe('Service detection (filesystem-based)', () => {
     fs.writeFileSync(path.join(phpBin, 'php.exe'), '');
     fs.writeFileSync(path.join(phpBin, 'php8apache2_4.dll'), '');
 
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
     assert.ok(apache.isInstalled, 'apache no detectado');
     assert.equal(apache.dependenciesReady, true, 'apache no marcó dependenciesReady con php en neutralino/bin');
   });
@@ -240,28 +248,28 @@ describe('Service detection (filesystem-based)', () => {
       fs.writeFileSync(path.join(dir, 'php8apache2_4.dll'), '');
     });
 
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
 
     assert.ok(apache, 'apache no detectado');
-    assert.deepEqual(apache.availablePhpVersions, ['8.2.1', '8.1.0', '7.4.33']);
+    assert.deepEqual(apache.availablePhpVersions.map(v => v.version), ['8.2.1', '8.1.0', '7.4.33']);
     assert.equal(apache.phpVersion, '8.2.1', 'no seleccionó la versión más reciente de PHP');
     assert.equal(apache.dependenciesReady, true, 'no marcó dependenciesReady con php detectado');
   });
 
   it('detecta Apache instalado en usr/bin y asigna versión', async () => {
-    writeIni(tmpDir, `[apache]\nversion=2.4.57`);
-    const apacheUsrBin = path.join(tmpDir, 'usr', 'bin', 'apache', '2.4.57');
+    writeIni(tmpDir, `[apache]\nversion=2.4.66`);
+    const apacheUsrBin = path.join(tmpDir, 'usr', 'bin', 'apache', '2.4.66');
     ensureDir(apacheUsrBin);
     fs.writeFileSync(path.join(apacheUsrBin, 'httpd.exe'), '');
 
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
 
     assert.ok(apache, 'apache no detectado');
-    assert.equal(apache.version, '2.4.57');
+    assert.equal(apache.version, '2.4.66');
     assert.ok(apache.isInstalled, 'apache no marcado como instalado desde usr/bin');
   });
 
@@ -270,9 +278,9 @@ describe('Service detection (filesystem-based)', () => {
     const nginxBin = path.join(tmpDir, 'bin', 'nginx', '1.25.0');
     ensureDir(nginxBin);
     fs.writeFileSync(path.join(nginxBin, 'nginx.exe'), '');
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const nginx = services.find(s => s.type === 'nginx');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const nginx = services.find(s => s.id === 'nginx');
     assert.ok(nginx);
     assert.ok(nginx.isInstalled);
     assert.equal(nginx.port, 80);
@@ -296,10 +304,10 @@ describe('Service detection (filesystem-based)', () => {
     });
     writeIni(tmpDir, iniContent.trim());
 
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
     specs.forEach(s => {
-      const found = services.find(x => x.type === s.type);
+      const found = services.find(x => x.id === s.type);
       assert.ok(found, `${s.type} missing`);
       assert.ok(found.isInstalled, `${s.type} not installed`);
       assert.equal(found.port, s.port);
@@ -315,9 +323,9 @@ describe('Service detection (filesystem-based)', () => {
     const dataPath = path.join(tmpDir, 'data', 'mysql');
     ensureDir(dataPath);
     await fsAdapter.writeFile(path.join(dataPath, 'custom.log'), '');
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const mysql = services.find(s => s.type === 'mysql');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const mysql = services.find(s => s.id === 'mysql');
     const labels = new Set(mysql.configs.map(c => c.label));
     assert.ok(labels.has('mysql/custom.log'));
   });
@@ -327,9 +335,9 @@ describe('Service detection (filesystem-based)', () => {
     const redisBin = path.join(tmpDir, 'bin', 'redis', '7.0');
     ensureDir(redisBin);
     fs.writeFileSync(path.join(redisBin, 'redis-server.exe'), '');
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const redis = services.find(s => s.type === 'redis');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const redis = services.find(s => s.id === 'redis');
     assert.ok(redis);
     assert.equal(redis.isInstalled, true);
     assert.equal(redis.port, 6379);
@@ -358,9 +366,9 @@ describe('Service detection (filesystem-based)', () => {
     fs.writeFileSync(path.join(phpBin, 'php8apache2_4.dll'), '');
 
     writeIni(tmpDir, `[apache]\nversion=2.4.0\n[php]\nversion=8.2.0`);
-    const cfg = loadAppConfig(fsAdapter, tmpDir, noop);
-    const services = await detectServices({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
-    const apache = services.find(s => s.type === 'apache');
+    const cfg = await loadAppConfig(fsAdapter, tmpDir, noop);
+    const services = await getAllServicesAvailable({ fsAdapter, appPath: tmpDir, userConfig, appConfig: cfg, log: noop });
+    const apache = services.find(s => s.id === 'apache');
     assert.ok(apache, 'apache no detectado');
     assert.equal(apache.isInstalled, true);
     assert.equal(apache.dependenciesReady, true);

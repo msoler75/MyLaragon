@@ -21,7 +21,7 @@
     "test:unit": "vitest run --exclude tests/api-endpoints.spec.js",
     "test:slow": "cross-env RUN_SLOW=1 vitest run tests/slow.spec.js",
     "test:install": "cross-env RUN_SLOW=1 vitest run tests/slow.install.spec.js",
-    "test:lifecycle": "cross-env RUN_SLOW=1 vitest run tests/apache-lifecycle.spec.js",
+    "test:lifecycle:apache": "cross-env RUN_SLOW=1 vitest run tests/apache-lifecycle.spec.js",
     "test:lifecycle:mysql": "cross-env RUN_SLOW=1 vitest run tests/mysql-lifecycle.spec.js",
     "test:lifecycle:mailpit": "cross-env RUN_SLOW=1 vitest run tests/mailpit-lifecycle.spec.js",
     "test:lifecycle:postgresql": "cross-env RUN_SLOW=1 vitest run tests/postgresql-lifecycle.spec.js",
@@ -56,6 +56,7 @@
     "vite": "npm:rolldown-vite@7.2.5",
     "vitest": "^4.0.17",
     "wait-on": "^9.0.3"
+    
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.2.5"

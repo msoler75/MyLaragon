@@ -44,6 +44,11 @@ const syncConfig = [
     source: "src/neutralino/lib/services-detector.js",
     target: "neutralino/www/lib/services-detector.js",
     header: "//  NO EDITAR ESTE ARCHIVO DIRECTAMENTE\n// Editable en: src/neutralino/lib/services-detector.js\n\n"
+  },
+  {
+    source: "src/neutralino/services.json",
+    target: "neutralino/www/services.json",
+    header: "//  NO EDITAR ESTE ARCHIVO DIRECTAMENTE\n// Editable en: src/neutralino/services.json\n\n"
   }
 ];
 

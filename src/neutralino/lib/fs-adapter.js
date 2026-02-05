@@ -12,12 +12,23 @@ export class FilesystemAdapter {
   }
 
   async readFile(path) {
+    console.log('[FilesystemAdapter.readFile] Leer archivo:', path);
     if (this.isDev) {
       try {
+        // Forzar ruta relativa al root del proyecto
+        let relPath = path;
+        if (/^[a-zA-Z]:\\|^[a-zA-Z]:\//.test(path) || path.startsWith('/')) {
+          // Si es absoluta, convertir a relativa respecto al root (asumido como process.cwd())
+          const cwd = (typeof process !== 'undefined' && process.cwd) ? process.cwd() : '';
+          console.log('[FilesystemAdapter.readFile] Ruta absoluta detectada:', path, 'CWD:', cwd);
+          if (cwd && path.startsWith(cwd)) {
+            relPath = path.slice(cwd.length).replace(/^\\|\//, '');
+          }
+        }
         const response = await fetch('/api/read-file', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path })
+          body: JSON.stringify({ path: relPath })
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
@@ -30,7 +41,9 @@ export class FilesystemAdapter {
     if (!this.neutralino?.filesystem) {
       throw new Error('Neutralino filesystem not available');
     }
-    return this.neutralino.filesystem.readFile(path);
+    const result = await this.neutralino.filesystem.readFile(path);
+    // Neutralino devuelve { data: "contenido..." }, extraer el data
+    return result.data || result;
   }
 
   async writeFile(path, content) {

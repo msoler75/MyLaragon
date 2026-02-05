@@ -85,6 +85,13 @@ function App() {
       try {
         console.log('[APP] Llamando a getServices con hidden:', hiddenToUse);
         const servicesData = await window.webservAPI.getServicesAndState(hiddenToUse)
+        // Log detallado de la estructura recibida
+        console.log('[APP][DEBUG] Estructura completa de servicesData:', servicesData);
+        if (servicesData) {
+          Object.keys(servicesData).forEach(key => {
+            console.log(`[APP][DEBUG] Clave '${key}':`, Array.isArray(servicesData[key]) ? `Array (${servicesData[key].length})` : typeof servicesData[key]);
+          });
+        }
         console.log('[APP] Servicios recibidos (DATA):', JSON.stringify(servicesData));
         
         if (!servicesData || !servicesData.all || !Array.isArray(servicesData.all)) {
@@ -276,7 +283,7 @@ function App() {
       try {
         setProcessingServices(prev => [...prev, serviceName])
         
-        // Identificar tipo para el delay de estabilizaci�n
+        // Identificar tipo para el delay de estabilización
         const service = services.find(s => s.name === serviceName);
 
         // Dependencias faltantes (p.ej. Apache requiere PHP)
@@ -286,7 +293,7 @@ function App() {
           return;
         }
 
-        // Si el servicio no est� instalado, redirigir a la vista de instalaci�n
+        // Si el servicio no está instalado, redirigir a la vista de instalación
         if (service && service.isInstalled === false) {
           window.dispatchEvent(new CustomEvent('change-tab', { detail: 'install' }));
           setProcessingServices(prev => prev.filter(s => s !== serviceName));
@@ -296,9 +303,9 @@ function App() {
         const type = service?.type?.toLowerCase() || '';
         const isHeavy = ['mysql', 'mariadb', 'mongodb', 'postgresql'].includes(type);
         
-        // Verificar si el servicio ya est� corriendo
+        // Verificar si el servicio ya está corriendo
         if (service?.status === 'running') {
-          console.log(`${serviceName} ya est� ejecut�ndose`);
+          console.log(`${serviceName} ya está ejecutándose`);
           setProcessingServices(prev => prev.filter(s => s !== serviceName));
           return;
         }
@@ -318,10 +325,23 @@ function App() {
         
         await loadServices();
         pushToast({ title: serviceName, message: t.started || 'Iniciado', type: 'success' });
+        setProcessingServices(prev => {
+          console.log(`[APP] Removiendo ${serviceName} de processingServices después de loadServices`);
+          return prev.filter(s => s !== serviceName);
+        });
       } catch (error) {
         console.error('Error starting service:', error);
+        
+        // Si es error de MySQL que requiere recuperación, notificar a la vista
+        if (serviceName.toLowerCase().includes('mysql') && error.message && error.message.includes('Puede requerir recuperación')) {
+          window.dispatchEvent(new CustomEvent('mysql-recovery-needed', { 
+            detail: { serviceName, error: error.message } 
+          }));
+        }
+        
         pushToast({ title: serviceName, message: error.message || 'Error al iniciar', type: 'error' });
       } finally {
+        console.log(`[APP] Finally block ejecutándose para ${serviceName}, removiendo de processingServices`);
         setProcessingServices(prev => prev.filter(s => s !== serviceName))
       }
     }
